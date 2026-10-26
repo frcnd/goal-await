@@ -1,0 +1,26 @@
+__pycache__/
+*.py[cod]
+.venv/
+.goal-await/
+.goal-lite/
+.agents/
+.codex/
+dist/
+.test-work/
+.env
+.env.*
+MANIFEST.sha256
+*.zip
+*.zip.sha256
+*.bak
+*.zip.tmp
+
+# Local development files.
+/AGENTS.md
+/PROVENANCE.json
+/tools/build_release.py
+
+# Only the public installation and AI guides belong in docs/ on Git.
+/docs/*
+!/docs/PROJECT_INSTALL.md
+!/docs/AI_GUIDE.md

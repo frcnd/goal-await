@@ -1,0 +1,4 @@
+interface:
+  display_name: "Goal-await"
+  short_description: "在当前对话推进目标，安排定时等待，支持手动暂停、恢复和验收完成"
+  default_prompt: "使用 $goal-await 执行我的完整目标，遇到等待时安排检查，通过验收后完成。"
