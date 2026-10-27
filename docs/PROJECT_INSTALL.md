@@ -1,21 +1,23 @@
-# Goal-await 项目级安装
+# Goal-await project-level installation
 
-项目级安装只为指定项目启用 Goal-await：它会写入该项目自己的 Skill、Stop hook、忽略规则和运行状态。跨项目共用请使用 [README](../README.md) 中的用户级安装；AI 代用户执行安装或使用时，另读 [AI 安装与使用指南](AI_GUIDE.md)。
+**English** | [简体中文](PROJECT_INSTALL.zh-CN.md)
 
-官方接口背景见 [Skill 路径](https://learn.chatgpt.com/docs/build-skills)和 [hooks 与信任](https://learn.chatgpt.com/docs/hooks)。
+Project-level installation enables Goal-await only for a specified project: it writes that project's own Skill, Stop hook, ignore rules, and runtime state. For cross-project use, see the user-level installation in [README](../README.md); if an AI installs or uses Goal-await on a user's behalf, also read the [AI installation and usage guide](AI_GUIDE.md).
 
-## 前置与环境
+For official interface background, see [Skill paths](https://learn.chatgpt.com/docs/build-skills) and [hooks and trust](https://learn.chatgpt.com/docs/hooks).
 
-- 使用包含本项目[安装器](../install.py)和 `skill/goal-await/` 的源码目录。Skill 在安装时复制到目标项目，之后不依赖下载目录。
-- 使用 Python 3.11+，准备一个已存在且路径准确的**目标项目目录**，并确认该项目可写。
-- 使用已登录、能加载 Skill、原生 Stop 和 same-chat heartbeat 的本地 Codex 桌面环境。目前验证范围为 Windows；其他平台尚未验证。
-- Windows 默认生成 PowerShell Stop 命令。实际宿主是 CMD 时，`plan` 与 `install` 都加 `--hook-shell cmd`；不要用另一种 shell 的离线结果推断可用。
-- 项目的 `.gitignore` 和 `.codex/hooks.json` 若已存在，须为 UTF-8（可带 BOM）；hook 文件还须为有效 JSON。编码或结构不符时先保留原文件并核对。
-- 一个项目只保留一种 Goal-await 安装。项目级和用户级 hook 会叠加，不要同时启用同名 Skill。
+## Prerequisites and environment
 
-## 预览、安装与检查
+- Use a source directory containing this project's [installer](../install.py) and `skill/goal-await/`. The Skill is copied to the target project during installation and does not depend on the download directory afterward.
+- Use Python 3.11+; prepare an existing **target project directory** with an accurate path, and confirm that the project is writable.
+- Use a local Codex desktop environment that is signed in and can load Skills, native Stop, and same-chat heartbeat. The current validation scope is Windows; other platforms have not been validated.
+- Windows generates a PowerShell Stop command by default. When the actual host is CMD, add `--hook-shell cmd` to both `plan` and `install`; do not use offline results from another shell to infer that it will work.
+- If the project already has `.gitignore` and `.codex/hooks.json`, they must be UTF-8 (BOM allowed); the hook file must also be valid JSON. If the encoding or structure does not match, preserve the original files and verify them first.
+- Keep only one Goal-await installation per project. Project-level and user-level hooks stack; do not enable identically named Skills at the same time.
 
-在 Goal-await 源码目录中运行；把 `python` 换成实际 Python 3.11+ 可执行文件：
+## Preview, install, and inspect
+
+Run these commands from the Goal-await source directory; replace `python` with the actual Python 3.11+ executable:
 
 ```powershell
 python install.py plan --project "C:\work\my-project"
@@ -23,51 +25,51 @@ python install.py install --project "C:\work\my-project"
 python install.py inspect --project "C:\work\my-project"
 ```
 
-`plan` 展示目标路径、数据目录和将写入的准确 Stop 定义，不写文件；Python 路径可在命令中核对。核对计划后再执行 `install`。`inspect` 当前返回同样的计划信息，不能替代安装成功回执或实际 hook 检查。备份位置见下方说明。
+`plan` shows the target paths, data directory, and exact Stop definition that will be written, without writing files; verify the Python path in the command. Review the plan before running `install`. `inspect` currently returns the same plan information and cannot replace a successful installation receipt or an actual hook check. See below for backup locations.
 
-目标项目已有 `.agents/skills/goal-await` 或尚未卸载的本安装记录时，安装器会拒绝覆盖。先保留副本和状态，核对来源，再使用对应安装器卸载；来源不明的副本不要直接删除。
+If the target project already has `.agents/skills/goal-await` or an installation record from this installer that has not been uninstalled, the installer refuses to overwrite it. Preserve a copy and state, verify the source, then use the corresponding installer to uninstall; do not directly delete copies of unknown origin.
 
-需要切换安装范围时，先停止旧目标、完成卸载，再安装新范围。嵌套项目还应检查父目录中已有的 Skill 和 hook，避免重复启用。
+To change the installation scope, stop the old goals and complete uninstallation first, then install the new scope. For nested projects, also check for existing Skills and hooks in parent directories to avoid enabling duplicates.
 
-## 准确信任 Stop
+## Trust the exact Stop
 
-安装成功不等于 Stop 已获信任。在该项目的 Codex 会话中用 `/hooks` 查看来源为项目 `.codex/hooks.json` 的 Goal-await Stop，核对命令与 `plan` 输出的 `handler.command` 完全一致，只信任这一条定义。不要因 Skill 已加载而跳过信任，也不要批量信任其他 hook。
+A successful installation does not mean Stop is trusted. In a Codex session for the project, use `/hooks` to view the Goal-await Stop sourced from the project `.codex/hooks.json`, verify that the command exactly matches `handler.command` in the `plan` output, and trust only that definition. Do not skip trust because the Skill has loaded, and do not trust other hooks in bulk.
 
-可选的[项目信任辅助](../tools/trust.py)仅适用于项目级安装。默认命令先只读显示准确 key、hash、状态和启用情况；确认后加 `--apply`：
+The optional [project trust helper](../tools/trust.py) applies only to project-level installations. By default, it displays the exact key, hash, status, and enablement state read-only; after verifying, add `--apply`:
 
 ```powershell
 python tools/trust.py --project "C:\work\my-project" --codex "C:\path\to\codex.exe"
 python tools/trust.py --project "C:\work\my-project" --codex "C:\path\to\codex.exe" --apply
 ```
 
-该辅助通过 Codex App Server 的 hook 目录和配置接口工作，不启动模型或业务对话，不复制登录凭据，也不关闭全部 hook 的信任。它只写这一条定义的 key/hash，并在项目外备份用户 `config.toml`。它不适用于用户级安装；host 接口不同、项目未受信任或发现并发配置变化时应停止，改走宿主界面。
+This helper works through Codex App Server's hook catalog and configuration interfaces. It does not start a model run or task chat, copy login credentials, or disable trust for all hooks. It writes the key/hash for only this definition and backs up the user's `config.toml` outside the project. It does not apply to user-level installations; stop and use the host interface if the host interfaces differ, the project is untrusted, or concurrent configuration changes are detected.
 
-## 重载
+## Reload
 
-信任后新建对话，或让原对话在空闲时正常重载配置。文件已写入、Skill 已显示或辅助进程已 reload，都不等于当前桌面会话已加载 Stop。不要归档或重启其他正在工作的对话。之后可在项目中输入 `$goal-await 开始：……`。
+After trusting, start a new conversation or let the original conversation normally reload its configuration while idle. The fact that files were written, a Skill is visible, or an auxiliary process reloaded does not mean the current desktop session has loaded Stop. Do not archive or restart other working conversations. You can then enter `$goal-await start: ...` in the project.
 
-## 写入位置与备份
+## Write locations and backups
 
-| 位置 | 内容 |
+| Location | Contents |
 |---|---|
-| `.agents/skills/goal-await/` | 自包含的 Skill、脚本和安装元数据 |
-| `.codex/hooks.json` | 合并后的 Stop 定义，保留其他 hook |
-| `.gitignore` | 仅在缺少时追加 `.goal-await/` 和 `.agents/skills/goal-await/` |
-| `.goal-await/` | 当前对话绑定、目标状态、事件和安装记录 |
-| `~/.codex/backups/goal-await/` | 默认的项目外时间戳备份；可用 `--backup-root` 改到项目外 |
+| `.agents/skills/goal-await/` | Self-contained Skill, scripts, and installation metadata |
+| `.codex/hooks.json` | Merged Stop definition, preserving other hooks |
+| `.gitignore` | Appends `.goal-await/` and `.agents/skills/goal-await/` only when absent |
+| `.goal-await/` | Bindings for the current conversation, goal state, events, and installation records |
+| `~/.codex/backups/goal-await/` | Default timestamped backup outside the project; use `--backup-root` to choose another location outside the project |
 
-安装器先预检并备份现有 hook、`.gitignore` 和已有安装记录，再写入；中途失败会回滚可识别的内容。备份根不能位于目标项目内。安装只复制本包文件，不写 Codex 登录、模型、provider 或业务产物。可选信任辅助另有自己的用户配置备份目录。
+The installer first runs preflight checks on existing hooks, `.gitignore`, and installation records, and backs them up before writing. If it fails partway through, it rolls back the content it can identify. The backup root cannot be inside the target project. Installation copies only files from this package; it does not write Codex login, model, provider, or task outputs. The optional trust helper has its own backup directory for user configuration.
 
-## 更新与卸载
+## Updates and uninstallation
 
-更新或卸载前，完成或暂停所有相关目标，并通过原生界面确认定时任务已经停止。然后运行：
+Before updating or uninstalling, complete or pause all related goals and confirm through the native interface that the timers have stopped. Then run:
 
 ```powershell
 python install.py uninstall --project "C:\work\my-project" --timers-paused
 ```
 
-仅当确实没有待停止的原生任务时才省略 `--timers-paused`。卸载器会在仍有 `RUNNING`/`WAITING` 目标、Skill 被修改、或记录与准确 hook 不匹配时拒绝操作。成功时只删除未被改动的本安装 Skill 和这一条 Stop，保留状态、旧信任项与业务文件；旧信任项没有对应 hook 就不会执行。
+Omit `--timers-paused` only when there really are no native tasks waiting to be stopped. The uninstaller refuses to proceed while a `RUNNING` or `WAITING` goal remains, the Skill has been modified, or the record does not match the exact hook. On success, it removes only the unmodified Skill from this installation and this one Stop, preserving state, old trust entries, and task files; an old trust entry will not run without a corresponding hook.
 
-更新时先卸载，再从新版本源码执行 `plan`、`install`，重新核对准确 Stop 并重载。未完成目标不会自动重启。若 `.gitignore` 在安装后被他人改过，不要用整份旧备份覆盖它，只核对并移除本安装追加的两行。
+To update, uninstall first, then run `plan` and `install` from the new source version, verify the exact Stop again, and reload. Incomplete goals are not restarted automatically. If someone else has changed `.gitignore` since installation, do not overwrite it with the entire old backup; verify and remove only the two lines appended by this installation.
 
-当前支持范围和使用限制见 [README](../README.md)。
+For the current supported scope and limitations, see [README](../README.md).

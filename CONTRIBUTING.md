@@ -1,25 +1,27 @@
-# 反馈与贡献
+# Feedback and contributions
 
-使用方式见 [README](README.md)。安装细节见 [项目安装指南](docs/PROJECT_INSTALL.md)，需要 AI 协助时可使用 [AI 安装与使用指南](docs/AI_GUIDE.md)。
+**English** | [简体中文](CONTRIBUTING.zh-CN.md)
 
-## 报告问题
+See the [README](README.md) for usage, the [project installation guide](docs/PROJECT_INSTALL.md) for project setup, and the [AI installation and usage guide](docs/AI_GUIDE.md) for AI assistance.
 
-请提供版本或 commit、系统、Python 与 Codex 版本、安装范围、当前 shell，以及预期和实际结果。附最短复现步骤及必要的脱敏错误信息即可；涉及自动接续时，请区分原生 Stop/heartbeat 与人工发送的继续消息。
+## Reporting a problem
 
-请勿上传登录文件、整个用户配置、配置备份、完整对话、私人路径、线程编号或业务数据。如果目标或定时任务尚在运行，也请说明当前状态。
+Include the version or commit, operating system, Python and Codex versions, installation scope, current shell, and expected versus actual behavior. Provide the shortest reproduction steps and only the necessary error details with private information removed. For automatic continuation issues, distinguish native Stop or heartbeat events from manually sent messages asking the AI to continue.
 
-## 修改与验证
+Do not upload login files, complete user configuration, configuration backups, full conversations, private paths, chat IDs, or project data. If a goal or scheduled task is still running, include its current status.
 
-项目保持 Python 标准库依赖，复用原生 Stop、heartbeat 和当前对话模型。运行状态与安装副本分离；安装和卸载应保留其他 hook 及用户改动。
+## Changes and validation
 
-离线测试在隔离目录中运行，不调用模型或创建真实定时任务。在仓库目录执行：
+Keep runtime dependencies limited to the Python standard library, using native Stop hooks, heartbeat tasks, and the current chat's model. Separate runtime state from installed Skill files. Installation and uninstallation should preserve other hooks and user modifications.
+
+Offline tests run in isolated directories without calling models or creating real scheduled tasks. From the repository directory, run:
 
 ```powershell
 python -X utf8 -B -m unittest discover -s tests -v
 ```
 
-按改动范围选择验证。涉及真实自动接续时，记录实际观察到的环节；不要把离线测试或人工继续当作原生自动执行通过。真实安装、任务和资源使用以测试者的授权范围为准。
+Choose validation appropriate to the change. When checking real automatic continuation, record what you actually observed. Offline tests and manual continuation are not evidence that native automatic execution passed. Real installations, tasks, and resource use must stay within the tester's authorization.
 
-提交前检查差异与文件列表，不提交安装副本、运行记录、业务文件或配置备份。公开文档仅保留用户说明和操作指南。
+Before committing, review the diff and file list. Exclude installed copies, runtime records, project files, and configuration backups. Public documentation should contain user-facing explanations and operating guides.
 
-本项目采用 [MIT 许可证](LICENSE)。提交贡献前，请确认你有权按此许可证提供相关内容，并保留适用的版权及许可声明。
+This project uses the [MIT License](LICENSE). Before contributing, confirm that you have the right to provide the material under this license, and retain applicable copyright and permission notices.

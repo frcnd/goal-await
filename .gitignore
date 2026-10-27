@@ -24,3 +24,5 @@ MANIFEST.sha256
 /docs/*
 !/docs/PROJECT_INSTALL.md
 !/docs/AI_GUIDE.md
+!/docs/PROJECT_INSTALL.zh-CN.md
+!/docs/AI_GUIDE.zh-CN.md

@@ -1,27 +1,27 @@
 ---
-name: 问题反馈
-about: 报告一个可复现的问题（仅附脱敏证据）
+name: Bug report (English)
+about: Report a reproducible problem with private details removed.
 title: ""
 labels: ""
 assignees: ""
 ---
 
-## 环境
+## Environment
 
-- commit / 版本：
-- 系统、Python、Codex core 版本：
-- 安装范围：项目级 / 用户级
-- 当前 shell、模型/provider（不含凭据）：
+- Commit / version:
+- Operating system, Python, and Codex core versions:
+- Installation scope: project / user
+- Current shell, model / provider (no credentials):
 
-## 预期与实际结果
+## Expected and actual behavior
 
-发生了什么，对任务有什么影响？
+What happened, and how did it affect your task?
 
-## 最短步骤与证据
+## Minimal steps and evidence
 
-说明是真实原生 Stop/heartbeat 还是离线模拟；人工“继续”不计自动接续。
-只附必要的脱敏错误及状态，不贴登录文件、整个配置、完整对话、私人路径、线程编号或业务数据。
+State whether you observed real native Stop / heartbeat events or an offline simulation. Manually sending a message to continue does not count as automatic continuation.
+Include only the necessary errors and state with private information removed. Do not share login files, entire configuration files, full conversations, private paths, chat IDs, or project data.
 
-## 当前状态
+## Current status
 
-目标及原生任务是否已暂停/完成/删除？是否发生人工修复？
+Are the goal and native task paused, completed, or deleted? Did you make any manual fixes?

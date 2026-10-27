@@ -1,107 +1,109 @@
 # Goal-await
 
-让 Codex 在当前桌面对话中持续推进目标：需要等待时安排定时检查，条件满足后接着做，验收完成后结束。支持开始、等待、暂停、恢复和完成。
+**English** | [简体中文](README.zh-CN.md)
 
-Goal-await 由 **Skill、本地状态脚本和固定 Stop hook** 组成，使用 Codex 原生定时任务回到同一对话。安装后，新目标不需要重新配置 hook；运行和安装只依赖 Python 标准库。
+Keep Codex working toward a goal in the current desktop chat. When work needs to wait, schedule a check and resume when the condition is met, then finish after verifying the result. Supports starting, waiting, pausing, resuming, and completing goals.
 
-首个公开版本为 `0.1.0-preview`，仅为codex设计，目前验证范围为 Windows 桌面。其他平台、跨重启恢复和长期无人值守尚未验证。
+Goal-await combines a **Skill, local state scripts, and a fixed Stop hook**. It uses native Codex scheduled tasks to return to the same chat. Once installed, new goals need no hook reconfiguration. Installation and runtime scripts use only the Python standard library.
 
-## 使用
+The first public release is `0.1.0-preview`, designed for Codex. Validation currently covers Windows desktop. Other platforms, recovery across restarts, and long unattended runs have not been validated.
 
-安装并重新加载后，在项目对话中输入完整目标，例如：
+## Usage
+
+After installation and reloading, describe the complete goal in your project chat, for example:
 
 ```text
-$goal-await 运行实验，等待结果并核对，最后生成报告。
-$goal-await 暂停
-$goal-await 恢复
-$goal-await 完成
+$goal-await Run the experiment, wait for the results, verify them, and generate a report.
+$goal-await pause
+$goal-await resume
+$goal-await complete
 ```
 
-通常只需给出一次目标，AI 会按进度处理等待和完成。请说明期望产物、验收标准，以及允许使用的资源；需要等待时，提供结果或日志的位置。已有上下文中的信息不用重复。
+Usually, you only need to state the goal once; the AI handles waiting and completion as work progresses. Include the expected outputs, acceptance criteria, and allowed resources. When waiting is needed, provide the result or log location. You do not need to repeat information already available in the chat.
 
-每个对话同时管理一个未完成目标，检查沿用当前对话的模型。等待次数、时间或接续预算耗尽后会停止自动推进并说明原因。`$goal-await` 是 Skill 调用，与原生 Goal 分别管理状态，不是内置 `/goal` 命令。
+Each chat manages one unfinished goal at a time, and checks use that chat's current model. Automatic progress stops with an explanation when the check count, time limit, or continuation budget is exhausted. `$goal-await` invokes a Skill. It maintains its own state separately from native Goal and does not add a built-in `/goal` command.
 
-## 主动使用或手动开启
+## Automatic selection or explicit invocation
 
-默认情况下，AI 可以在认为任务适合时主动选择 Goal-await。安装本身不会开始目标；选择并执行 Skill 的开始动作后，当前对话才会绑定目标。
+By default, the AI can select Goal-await when it considers the task suitable. Installation alone does not start a goal; the current chat is bound to a goal when the Skill's start action runs.
 
-如果你希望每次都由自己明确开启，可以在**安装前**编辑仓库中的 [skill/goal-await/agents/openai.yaml](skill/goal-await/agents/openai.yaml)，保留已有 `interface`，在同一级添加：
+If you prefer to explicitly start Goal-await every time, edit [skill/goal-await/agents/openai.yaml](skill/goal-await/agents/openai.yaml) in this repository **before installation**. Keep the existing `interface` and add this at the same level:
 
 ```yaml
 policy:
   allow_implicit_invocation: false
 ```
 
-然后按下方流程安装，用 `$goal-await` 显式调用。这是 Codex 的[调用策略设置](https://learn.chatgpt.com/docs/build-skills#optional-metadata)：关闭根据任务自动调用，仍允许显式调用；它不限制 AI 读取文件的权限。
+Then install as described below and invoke it explicitly with `$goal-await`. This Codex [invocation policy](https://learn.chatgpt.com/docs/build-skills#optional-metadata) disables automatic selection based on the task while preserving explicit invocation. It does not restrict the AI's permission to read files.
 
-已有安装请先按本文的更新步骤卸载，再修改仓库源文件并重新安装。不要直接改已安装的副本：安装器会校验文件，修改过的副本需要保留并核对后才能卸载。该设置不负责暂停已经开始的目标。
+For an existing installation, follow the update procedure below to uninstall it, then edit the repository source and reinstall. Avoid editing the installed copy directly: the installer verifies file hashes, so modified copies must be preserved and reviewed before uninstalling. This setting does not pause goals that have already started.
 
-## 安装
+## Installation
 
-需要 Python 3.11+，以及已登录、可使用本地 Python、Stop hook 和原生同对话 heartbeat 定时任务的 Codex 桌面环境。宿主需要提供真实 `CODEX_THREAD_ID` 和 `automation_update` 接口。
+Requires Python 3.11+ and a signed-in Codex desktop environment that supports local Python execution, Stop hooks, and native same-chat heartbeat tasks. The host must provide a real `CODEX_THREAD_ID` and the `automation_update` interface.
 
-| 安装范围 | 适合的用途 | 入口 |
+| Scope | Use case | Instructions |
 |---|---|---|
-| 当前用户 | 多个项目共用一份安装 | 下方步骤 |
-| 单个项目 | 只在选定项目中使用 | [项目安装指南](docs/PROJECT_INSTALL.md) |
+| User | Share one installation across projects | Steps below |
+| Project | Enable it only in a selected project | [Project installation guide](docs/PROJECT_INSTALL.md) |
 
-两种范围选一种，避免在同一项目同时启用同名安装。单独复制 Skill 文件不能完成本包的路径生成和 hook 登记，请使用本仓库安装器。
+Choose one scope to avoid enabling both installations in the same project. Copying Skill files alone does not generate runtime paths or register the hook; use this repository's installer.
 
-### 当前用户安装
+### User installation
 
-下载或克隆仓库后，在仓库目录运行。先查看预览，核对路径和命令，再安装：
+Download or clone this repository, then run these commands from its directory. Review the plan and verify the paths and command before installing:
 
 ```powershell
 python tools/install_user.py plan
 python tools/install_user.py install
 ```
 
-Windows 默认使用 PowerShell 生成 hook 命令；若 Codex 对话实际使用 CMD，两条命令都加 `--hook-shell cmd`。`python` 应指向可用的 Python 3.11+；必要时使用其完整路径。
+On Windows, the default hook command targets PowerShell. If the Codex chat actually uses CMD, add `--hook-shell cmd` to both commands. `python` must resolve to a working Python 3.11+ installation; use its full path if needed.
 
-默认写入位置如下；`CODEX_HOME` 未设置时为 `~/.codex`。
+Default locations are listed below. When `CODEX_HOME` is unset, it defaults to `~/.codex`.
 
-| 内容 | 位置 |
+| Content | Location |
 |---|---|
-| Skill 和脚本 | `~/.agents/skills/goal-await/` |
-| 固定 Stop hook | `$CODEX_HOME/hooks.json` |
-| 目标状态和安装记录 | `$CODEX_HOME/goal-await/` |
-| 配置备份 | `$CODEX_HOME/backups/goal-await-user/` |
+| Skill and scripts | `~/.agents/skills/goal-await/` |
+| Fixed Stop hook | `$CODEX_HOME/hooks.json` |
+| Goal state and installation record | `$CODEX_HOME/goal-await/` |
+| Configuration backups | `$CODEX_HOME/backups/goal-await-user/` |
 
-预览不写文件。安装会备份已有配置并合并自己的 hook，保留其他 hook；不修改登录、模型或 provider。安装副本自包含，之后不依赖仓库所在位置。
+The plan writes no files. Installation backs up existing configuration and merges its own hook while preserving other hooks. It does not change your login, model, or provider. The installed copy is self-contained and no longer depends on the repository's location.
 
-**安装后还需要信任和重载：**
+**Trust and reload are still required after installation:**
 
-1. 在 Codex hooks 界面或 CLI `/hooks` 中找到用户配置来源的 Goal-await Stop，核对命令与预览一致，只信任这一条。
-2. 新建对话，或在原对话空闲时正常重新加载配置，然后使用 `$goal-await`。
+1. In the Codex hooks interface or CLI `/hooks`, find the Goal-await Stop from the user configuration. Verify that its command matches the plan and trust only that definition.
+2. Open a new chat, or reload configuration normally while the existing chat is idle, then use `$goal-await`.
 
-文件写入成功不代表已打开的对话已加载。项目用的 `tools/trust.py --project` 不适用于用户级安装。若运行时无法写入状态目录，按宿主的权限流程只授权所需目录。
+Writing the files does not mean an already-open chat has loaded them. The project helper `tools/trust.py --project` does not apply to user installations. If the runtime cannot write its state directory, use the host's permission flow to authorize only the required directory.
 
-可随时查看安装记录：
+Inspect the installation record at any time:
 
 ```powershell
 python tools/install_user.py inspect
 ```
 
-遇到已有同名 Skill 时，安装器会停止。先核对来源；本包安装的副本使用对应安装器卸载，其他来源的副本先备份再移出安装位置。
+The installer stops if a same-named Skill already exists. Check its origin first. Use the corresponding installer to remove a copy installed by this package; back up copies from other sources before moving them out of the installation location.
 
-### 更新或卸载
+### Updating or uninstalling
 
-先暂停或完成所有使用这份安装的目标，并在原生任务界面确认相关定时任务已暂停或删除，再执行：
+First pause or complete all goals using this installation, and confirm in the native task interface that their scheduled tasks are paused or deleted. Then run:
 
 ```powershell
 python tools/install_user.py uninstall --timers-paused
 ```
 
-卸载移除本包未被修改的安装副本和自己的 hook，保留目标记录、业务产物及其他 hook。文件已被修改时会停止，需先保留并核对改动。旧信任项可能保留，可按准确的单条定义清理；不要用整份旧备份覆盖较新的配置。
+Uninstallation removes this package's unmodified installed copy and its own hook, preserving goal records, task outputs, and other hooks. It stops if files have changed so you can preserve and review the changes. An old trust entry may remain; remove only the exact entry after reviewing it. Do not overwrite newer configuration with an entire old backup.
 
-更新时，卸载后用新版本重新预览、安装、核对信任并重载。未完成目标不会自动重启。项目级卸载命令见[项目安装指南](docs/PROJECT_INSTALL.md)。
+To update, uninstall first, then use the new version to plan, install, review trust, and reload. Unfinished goals do not restart automatically. For project uninstall commands, see the [project installation guide](docs/PROJECT_INSTALL.md).
 
-## 让 AI 帮你安装
+## Ask AI to help with installation
 
-可以把 [AI 安装与使用指南](docs/AI_GUIDE.md) 交给 Codex，并告诉它要安装到当前用户还是哪个项目。该指南用于安装和使用协助；安装后的运行流程由 Skill 提供。
+Give Codex the [AI installation and usage guide](docs/AI_GUIDE.md) and tell it whether to install for the current user or for a specific project. That guide supports installation and usage assistance; the installed Skill defines the runtime workflow.
 
-## 反馈与贡献
+## Feedback and contributions
 
-问题反馈和开发检查见 [CONTRIBUTING.md](CONTRIBUTING.md)。请只提供必要的脱敏信息。
+See [CONTRIBUTING.md](CONTRIBUTING.md) for issue reports and development checks. Share only the necessary information with private details removed.
 
-本项目采用 [MIT 许可证](LICENSE)。允许使用、修改、商用和再分发，须保留版权及许可声明。
+This project uses the [MIT License](LICENSE). Use, modification, commercial use, and redistribution are allowed, provided the copyright and permission notices are retained.

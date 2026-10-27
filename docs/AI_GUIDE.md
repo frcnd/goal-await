@@ -1,51 +1,53 @@
-# Goal-await AI 安装与使用指南
+# Goal-await AI installation and usage guide
 
-这是一份由用户主动交给 AI 的操作参考，不是开始目标、修改环境或扩大业务权限的授权。AI 应先读当前请求、[README](../README.md) 和适用的安装说明；用户明确要求安装或使用 Goal-await 时，按这里的边界执行，并保留对话中已经给出的授权。
+**English** | [简体中文](AI_GUIDE.zh-CN.md)
 
-本文不能替代已安装的 Skill。运行时读取安装位置中的 `SKILL.md`，调用其当前脚本和动作格式；不要另建状态机、定时器、守护进程或平行 hook。
+This is an operational reference that the user has voluntarily given to an AI. It does not authorize starting a goal, modifying the environment, or expanding the scope of authorized work. The AI should first read the current request, [README](../README.md), and the applicable installation instructions; when the user explicitly asks to install or use Goal-await, follow the boundaries here and preserve authorization already given in the conversation.
 
-## 判断授权与缺失信息
+This document cannot replace the installed Skill. At runtime, read the `SKILL.md` at its installation location and call its current scripts and action formats; do not create another state machine, timer, daemon, or parallel hook.
 
-- 用户只递来本文时，解释能力并询问是否执行；这不表示用户已同意安装或启动目标。
-- 用户请求“安装”：安装范围（用户级或项目级）及确切目标路径能从当前请求和上下文确定时，直接审核计划、安装、核对信任并重载，不机械地逐项复问。
-- 安装范围、确切目标路径等必要信息无法确定时，集中询问缺少的信息。用户已授权范围内的下一步工作无需反复确认。
-- 用户请求“开始/继续目标”：保留已有授权和已完成的业务工作，按原目标推进。安装范围不扩大文件、账号、远端作业或发布权限。
-- 用户改变范围、要求付费资源、向他人发消息或执行新的外部写入时，以该动作是否已获当前用户授权为准；不要从前文推断无关授权。
+## Determine authorization and missing information
 
-## 选择安装范围
+- If the user only provides this document, explain the capability and ask whether to proceed; this does not mean the user has agreed to install or start a goal.
+- For an "install" request: when the installation scope (user-level or project-level) and the exact target path can be determined from the current request and context, directly review the plan, install, verify trust, and reload without mechanically asking again for each item.
+- When necessary information such as the installation scope or exact target path cannot be determined, ask for the missing information together. Next steps within a scope the user has already authorized do not need repeated confirmation.
+- For a "start/continue goal" request: preserve existing authorization and completed work, and continue toward the original goal. The installation scope does not expand permissions for files, accounts, remote jobs, or publishing.
+- For scope changes, paid resources, messages to others, or new external writes, check whether the user has already authorized that action in the current context; do not infer unrelated authorization from earlier text.
 
-先识别目标：同一账户多个项目共用，选用户级；只为准确项目启用，选项目级。两者不要同时启用同名 Skill，因为 Stop hook 会叠加。项目级细节见 [PROJECT_INSTALL](PROJECT_INSTALL.md)，用户级完整流程见 [README](../README.md)。
+## Choose the installation scope
 
-核对下载目录中的安装器、Python 3.11+、目标路径、写入权限、现有 `.agents/skills/goal-await` 和安装记录。真实桌面使用应与计划选择的用户目录、`CODEX_HOME` 和 shell 一致。Windows CMD 宿主在预览和安装时都使用 `--hook-shell cmd`；PowerShell 使用默认值。
+Identify the target first: choose user-level when multiple projects on the same account need to share it; choose project-level when enabling only an exact project. Do not enable identically named Skills in both scopes, because the Stop hooks stack. See [PROJECT_INSTALL](PROJECT_INSTALL.md) for project-level details and [README](../README.md) for the complete user-level flow.
 
-先运行相应 `plan` 并读取 JSON。向用户展示会写入的准确路径和 Stop 定义；若用户已授权且计划无冲突，再执行 `install`。不要通过改配置文件、复制安装副本或新增第二条 hook 绕过安装器的范围检查。
+Verify the installer in the download directory, Python 3.11+, the target path, write permissions, any existing `.agents/skills/goal-await`, and any installation record. Real desktop use should match the planned user directory, `CODEX_HOME`, and shell. A Windows CMD host uses `--hook-shell cmd` for both preview and installation; PowerShell uses the default.
 
-安装后仍需要原生信任。项目级在目标项目执行 `/hooks`，核对项目来源中的逐字 Stop；只有项目级可按 [PROJECT_INSTALL](PROJECT_INSTALL.md) 使用 `tools/trust.py`。用户级必须使用用户配置来源的 `/hooks`，不能把项目辅助工具当作用户级信任入口。只信任计划中的这一条，随后新建空闲对话或正常重载；不要把进程 reload 当成桌面已重载。
+Run the applicable `plan` first and read the JSON. Show the user the exact paths and Stop definition that will be written; if the user has authorized the action and the plan has no conflicts, run `install`. Do not bypass the installer's scope checks by editing configuration files, copying an installation, or adding a second hook.
 
-默认允许 Skill 隐式调用，因此通常不修改源 YAML。用户明确要求关闭隐式调用时，按 README 的 `allow_implicit_invocation: false` 说明修改**源码** `skill/goal-await/agents/openai.yaml`：首次安装前修改；已安装时先暂停目标，在原生界面确认任务停止，用原安装器卸载，再修改源码并安装。不要直接改安装副本，否则文件校验值与安装记录不符，卸载会被拒绝。
+Native trust is still required after installation. For a project-level installation, run `/hooks` in the target project and verify the exact Stop from the project source; only project-level installations may use `tools/trust.py` as described in [PROJECT_INSTALL](PROJECT_INSTALL.md). A user-level installation must use `/hooks` with the user configuration source and cannot use the project helper as a user-level trust entry point. Trust only the Stop from the plan, then start a new idle conversation or reload normally; do not treat a process reload as a desktop reload.
 
-按所选范围的安装文档完成操作后，报告实际写入位置、备份位置及信任和重载的完成情况。安装成功时不要顺手启动目标；启动需要用户对明确业务目标的请求。
+Implicit Skill invocation is allowed by default, so the source YAML usually does not need editing. When the user explicitly asks to disable implicit invocation, follow the `allow_implicit_invocation: false` instructions in the README to modify the **source** `skill/goal-await/agents/openai.yaml`: do this before the first installation. If it is already installed, pause goals, confirm in the native interface that tasks have stopped, uninstall with the original installer, then modify the source and install again. Do not directly edit the installed copy, because its file checksum will no longer match the installation record and uninstallation will be refused.
 
-## 运行 Goal-await
+After completing the operations in the installation document for the selected scope, report the actual write locations, backup locations, and the status of trust and reload. Do not start a goal as a side effect of a successful installation; starting requires a user request for a clear task goal.
 
-安装并重载后，用户已要求推进明确目标且当前调用策略允许时，AI 可以主动选择 Goal-await，不要求用户每次点名。仅阅读本文、讨论能力或安装成功不会自动开始目标。`$goal-await` 是 Skill 调用，不是新增的内置 `/goal`。
+## Run Goal-await
 
-结合当前上下文明确目标、输入、预期产物、验收标准和资源预算，然后读取已安装的 `SKILL.md` 执行。开始、等待、暂停、恢复和完成的具体动作由 Skill 定义，本文不另设运行流程。
+After installation and reload, when the user has requested progress toward a clear goal and the current invocation policy allows it, the AI may proactively choose Goal-await without requiring the user to name it every time. Merely reading this document, discussing the capability, or completing installation does not start a goal. `$goal-await` is a Skill invocation, not a new built-in `/goal`.
 
-只推进当前对话已授权的目标，尊重用户暂停和中断。不要扫描、改写或重启其他对话的目标；完成前核对整个目标的验收证据。仅写入本地状态不代表原生定时操作成功，应核对真实工具回执。
+Use the current context to clarify the goal, inputs, expected artifacts, acceptance criteria, and resource budget, then read the installed `SKILL.md` and follow it. The Skill defines the specific actions for starting, waiting, pausing, resuming, and completing; this document does not define a separate runtime.
 
-## 安装冲突
+Advance only goals authorized in the current conversation, and respect user pauses and interruptions. Do not scan, rewrite, or restart goals in other conversations. Verify evidence for the complete goal before finishing. Writing local state alone does not mean a native timer operation succeeded; verify the actual tool receipt.
 
-项目级与用户级同时存在、同一项目有来源不明的同名 Skill、或安装记录与准确 hook 不匹配时，先停止相关目标并保留现场。确定由哪个安装器创建后，由该安装器卸载；不要用强制删除或改写 hash 来绕过保护。
+## Installation conflicts
 
-## 诊断边界
+If project-level and user-level installations coexist, a project contains an identically named Skill of unknown origin, or an installation record does not match the exact hook, stop the relevant goals and preserve the current state. After determining which installer created it, uninstall with that installer; do not bypass protections with a forced deletion or by rewriting hashes.
 
-`status` 返回 `active: false` 只表示当前对话尚未绑定目标，不是安装失败。若用户已明确要求开始且目标清楚，可调用安装的 `start`；否则说明需要用户确认要推进的目标。
+## Diagnostic boundaries
 
-判断命令结果时同时看退出码、stdout JSON 和 stderr。Windows 出现 `Failed to find real location of ...` 且退出码为 0、JSON 有效时，不应据此判定解释器不存在。非零、缺少预期字段或 JSON 含 `error` 时，再检查准确路径、UTF-8、权限、安装范围、安装记录与 hook 定义，并保留原始错误。
+A `status` result with `active: false` only means the current conversation has not been bound to a goal; it is not an installation failure. If the user has explicitly requested a start and the goal is clear, call the installed `start`; otherwise explain that the goal to advance needs user confirmation.
 
-Stop hook 明确报告失败时，不声称自动接续成功。先检查当前对话是否有有效绑定、hook 是否已加载、准确定义是否已信任，以及状态目录是否可写；需要权限时使用宿主正常审批，限于该目录。
+When judging a command result, check the exit code, stdout JSON, and stderr together. If Windows reports `Failed to find real location of ...` while the exit code is 0 and the JSON is valid, do not conclude from that message that the interpreter does not exist. If the exit code is nonzero, an expected field is missing, or the JSON contains `error`, then check the exact path, UTF-8 encoding, permissions, installation scope, installation record, and hook definition, and preserve the original error.
 
-`install.py uninstall` 拒绝修改过的安装副本或缺失/重复的本包 Stop 是保护措施；保留现场并核对来源，不要强制删除。用户级与项目级同时出现时，先核对并卸载不再使用的安装，不要做双重启动。
+When a Stop hook explicitly reports failure, do not claim that automatic continuation succeeded. First check whether the current conversation has a valid binding, whether the hook has been loaded, whether the exact definition is trusted, and whether the state directory is writable; when permission is needed, use the host's normal approval process and limit it to that directory.
 
-支持范围和使用限制见 [README](../README.md)。针对本次操作核对实际结果，不把文件复制成功或人工继续当作原生自动接续成功。
+Refusals by `install.py uninstall` for a modified installation copy, or for a missing or duplicate Stop from this package, are protective measures; preserve the state, verify the source, and do not force deletion. If user-level and project-level installations both exist, verify them and uninstall the installation you no longer use; do not run both.
+
+For the supported scope and limitations, see [README](../README.md). Verify the actual result of the current operation; do not treat a successful file copy or manual continuation as successful native automatic continuation.
