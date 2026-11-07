@@ -36,6 +36,18 @@ Use the current context to clarify the goal, inputs, expected artifacts, accepta
 
 Advance only goals authorized in the current conversation, and respect user pauses and interruptions. Do not scan, rewrite, or restart goals in other conversations. Verify evidence for the complete goal before finishing. Writing local state alone does not mean a native timer operation succeeded; verify the actual tool receipt.
 
+## Exception recovery
+
+For a new goal, use the Skill's start workflow with `--recover-errors`; this is the Skill default. The CLI option remains explicit opt-in. The default is two attempts at two-minute intervals, configurable with `--recovery-max-attempts` from 1 through 5 and `--recovery-interval-minutes` from 1 through 60. If start cannot identify a supported active transcript and actual model, stop and explain that recovery was not enabled; do not guess or substitute a model.
+
+Execute every returned native automation effect and verify its receipt before describing the timer as armed. On first creation, read the actual automation ID from the native tool result and bind that exact ID. Recovery and later waiting use that one ID and a one-shot `RDATE` schedule. When an acknowledge result contains automation effects, execute those as well. A continuation JSON object is pending work until its acknowledge command returns `accepted: true`; then update the timer before doing business work. Do not send a message to the current chat or create a second timer.
+
+Recovery admits only an exact terminal `max_output_tokens` message or one of the two exact premature-stream messages recognized by the packaged script. It does not infer failure from elapsed time and does not resubmit arbitrary business jobs. The gate checks the original chat and workspace, the automation marker, the prior and current turns, interruption state, remaining attempts, delivery acknowledgement, and the actual model. Continue from saved artifacts and the latest context; inspect side effects before doing only the unfinished work.
+
+The host may route one checker request to a fallback model. The Skill cannot prevent that request, but the gate must reject business continuation when the actual model differs from the model pinned from the transcript. Stop recovery on user interruption, unknown errors, missing or unsupported transcript data, model drift, exhausted attempts, or an unacknowledged delivery. If the model fails before the first recovery gate or before the next one-shot is armed, report that the single wake was consumed and ask the user to continue manually.
+
+For an old RUNNING goal after a manual resume, call `recovery-enable` in that same business chat and execute the returned effects. Existing goals without recovery fields keep their old behavior. Before upgrading from `0.1.0-preview`, pause the goals and native timers, uninstall, then install and reload `0.2.0-preview`. Do not claim that existing goals restart automatically; they do not.
+
 ## Installation conflicts
 
 If project-level and user-level installations coexist, a project contains an identically named Skill of unknown origin, or an installation record does not match the exact hook, stop the relevant goals and preserve the current state. After determining which installer created it, uninstall with that installer; do not bypass protections with a forced deletion or by rewriting hashes.
@@ -47,6 +59,8 @@ A `status` result with `active: false` only means the current conversation has n
 When judging a command result, check the exit code, stdout JSON, and stderr together. If Windows reports `Failed to find real location of ...` while the exit code is 0 and the JSON is valid, do not conclude from that message that the interpreter does not exist. If the exit code is nonzero, an expected field is missing, or the JSON contains `error`, then check the exact path, UTF-8 encoding, permissions, installation scope, installation record, and hook definition, and preserve the original error.
 
 When a Stop hook explicitly reports failure, do not claim that automatic continuation succeeded. First check whether the current conversation has a valid binding, whether the hook has been loaded, whether the exact definition is trusted, and whether the state directory is writable; when permission is needed, use the host's normal approval process and limit it to that directory.
+
+For recovery, distinguish an admitted continuation from a request the host merely sent. A successfully created or updated native task needs its actual receipt and binding. Observe the gate result, execute ACK effects, and require `accepted: true` before business continuation. Report interruption, model mismatch, unsupported transcript format, exhausted attempts, or a consumed one-shot wake as stopping conditions rather than as proof that the business goal failed.
 
 Refusals by `install.py uninstall` for a modified installation copy, or for a missing or duplicate Stop from this package, are protective measures; preserve the state, verify the source, and do not force deletion. If user-level and project-level installations both exist, verify them and uninstall the installation you no longer use; do not run both.
 

@@ -29,6 +29,8 @@ def stop(root, event, max_continuations=3):
         # Waiting is owned by the existing native timer; manual pause always wins.
         if state['state'] != 'RUNNING':
             return {}
+        if state.get('recovery_denied_turn_id') == event['turn_id']:
+            return {}
         if state.get('delivery') and state['delivery']['state'] != 'ACKNOWLEDGED':
             return {'systemMessage': 'Goal-await 接续票据尚未确认，本轮不自动继续；请检查目标记录。'}
         turn_id = event['turn_id']

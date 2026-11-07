@@ -5,6 +5,7 @@ The calling Codex chat executes returned actions with its existing native tools.
 """
 import argparse
 from contextlib import contextmanager
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -79,7 +80,7 @@ def control_lock(root):
 
 def create(objective, thread_id, project_id, *, checker_thread_id=None, root=None, model=None,
            continuation='继续原目标，先读取检查结果再行动。', observer_mode='same-chat',
-           workspace=None, context_summary=''):
+           workspace=None, context_summary='', recovery=None):
     if observer_mode != 'same-chat':
         raise ValueError('This preview supports same-chat mode only')
     if observer_mode == 'same-chat':
@@ -96,8 +97,91 @@ def create(objective, thread_id, project_id, *, checker_thread_id=None, root=Non
                  observer_mode=observer_mode, workspace=str(Path(workspace or Path.cwd()).resolve()),
                  context_summary=context_summary,
                  continuation=continuation, delivery=None, created_at=time.time())
+    if recovery is not None:
+        state['recovery'] = recovery
     save(root, state, 'goal_started', thread_id=thread_id)
     return root
+
+
+def recovery_settings(thread_id, workspace, max_attempts=2, interval_minutes=2):
+    """Opt in only with current-chat evidence; never guess a model or transcript."""
+    if not 1 <= max_attempts <= 5 or not 1 <= interval_minutes <= 60:
+        raise ValueError('Recovery requires 1..5 attempts and a 1..60 minute interval')
+    from recovery_evidence import capture
+    snapshot = capture(thread_id, workspace)
+    now = time.time()
+    return dict(snapshot=snapshot, max_attempts=max_attempts, attempts=0,
+                interval_minutes=interval_minutes, since=now,
+                next_at=now + interval_minutes * 60, handled_turn_ids=[])
+
+
+def arm_recovery(state):
+    recovery = state.get('recovery')
+    if recovery:
+        recovery['next_at'] = time.time() + recovery['interval_minutes'] * 60
+
+
+def one_shot(at):
+    when = datetime.fromtimestamp(max(at,time.time()+60),timezone.utc).strftime('%Y%m%dT%H%M%SZ')
+    return 'RDATE:' + when
+
+
+def model_boundary_error(state):
+    if not state.get('recovery'):
+        return None
+    from recovery_evidence import capture
+    try:
+        actual = capture(state['thread_id'],state['workspace'])
+    except (OSError,ValueError):
+        return '无法核实当前检查模型，停止自动推进'
+    if actual.get('interrupted') or actual.get('prior_interrupted'):
+        return '原会话被用户中断，停止自动推进'
+    if actual['model'] != state['recovery']['snapshot']['model']:
+        return '当前检查模型与目标绑定模型不一致，停止自动推进'
+    return None
+
+
+def model_review(root, state, reason):
+    state.update(before_pause=state['state'],state='NEEDS_REVIEW',reason=reason)
+    state['generation'] += 1
+    save(root,state,'model_boundary_stopped',reason=reason)
+    answer = response(root,state,eligible=False,reason=reason)
+    answer['accepted'] = False  # Preserve pause effects even for a rejected ACK.
+    return answer
+
+
+def recovery_prompt(root, state):
+    return (f"Goal-await {state['run_id']}：单次异常恢复检查，先执行唯一准入命令：\n"
+            f"{command(root, 'recover-check')} --generation {state['generation']}\n"
+            '命令失败或 eligible/accepted 不是 true 时，不推进业务；只同步实际返回的定时操作并结束。'
+            '获准时先同步 effects.automation，再执行 local_continuation.acknowledge_command，'
+            '只有确认成功才按 local_continuation.prompt 在本对话继续。'
+            '不向自己发消息，不改模型，不重复业务提交。')
+
+
+def recovery_review(root, state, reason):
+    state.update(state='NEEDS_REVIEW', before_pause='RUNNING', reason=reason)
+    state['generation'] += 1
+    save(root, state, 'recovery_stopped', reason=reason)
+    return response(root, state, eligible=False, reason=reason)
+
+
+def reject_recovery(root, state, reason, turn_id=None):
+    # A denied heartbeat must not fall through to ordinary Stop continuation.
+    # Keep a stale prompt from changing the current generation or its timer.
+    if state['state'] == 'RUNNING':
+        if not turn_id:
+            from recovery_evidence import capture
+            try:
+                current = capture(state['thread_id'],state['workspace'])
+            except (OSError,ValueError):
+                return recovery_review(root,state,'无法核实被拒绝的恢复轮次；停止自动恢复')
+            if current.get('interrupted') or current.get('prior_interrupted'):
+                return model_review(root,state,'原会话被用户中断，停止自动推进')
+            turn_id = current['turn_id']
+        state['recovery_denied_turn_id'] = turn_id
+        save(root,state,'recovery_denied',turn_id=turn_id,reason=reason)
+    return response(root,state,accepted=False,eligible=False,reason=reason)
 
 
 def enter_wait(state, note):
@@ -105,6 +189,8 @@ def enter_wait(state, note):
     state['state'] = 'WAITING'
     state['wait'] = dict(note, run_id=state['run_id'], thread_id=state['thread_id'],
                          generation=state['generation'], created_at=time.time(), checks=0)
+    if state.get('recovery'):
+        state['wait']['next_at'] = time.time() + note['interval_minutes'] * 60
     state['delivery'] = None
     state.pop('active_observation', None)
     state.pop('reason', None)
@@ -113,7 +199,7 @@ def enter_wait(state, note):
 def checker_prompt(root, state):
     return (f"Goal-await {state['run_id']}：本轮只执行下列准入命令，不改模型，不执行历史等待命令。\n"
             f"{command(root, 'check')} --generation {state['generation']}\n"
-            "读取 JSON 的 context、instructions 和 observation_id；获准后自主只读调查，脚本仅为可选证据。"
+            "读取 JSON 的 context、instructions 和 observation_id；先同步返回的定时操作，再自主只读调查，脚本仅为可选证据。"
             "准入失败则执行返回的暂停操作并结束。正常未完成保持安静，只报告实质变化、完成、失败或需要用户行动。")
 
 
@@ -181,10 +267,23 @@ def on_turn_completed(root, event):
 def effects(root, state, *, dispatch=False):
     result = {}
     ident = state.get('automation_id')
-    if state.get('wait') and (ident or state['state'] == 'WAITING'):
+    recovery = state.get('recovery')
+    if recovery and state['state'] != 'WAITING':
+        # One shot, consumed before dispatch. If the model fails before its gate,
+        # there is no recurring timer to produce an unbounded failure loop.
+        pending = state.get('delivery')
+        active = state['state']=='RUNNING' and (not pending or pending['state']=='ACKNOWLEDGED'
+                                               or pending.get('cause')=='provider_failure')
+        spec = dict(name='Goal-await ' + state['run_id'],prompt=recovery_prompt(root,state),
+                    rrule=one_shot(recovery['next_at']),status='ACTIVE' if active else 'PAUSED',
+                    kind='heartbeat',destination='thread',targetThreadId=state['thread_id'])
+        if ident or state['state'] == 'RUNNING':
+            result['automation'] = dict(spec,mode='update',id=ident) if ident else dict(spec,mode='create')
+    elif state.get('wait') and (ident or state['state'] == 'WAITING'):
         spec = dict(name='Goal-await ' + state['run_id'],
                     prompt=checker_prompt(root, state),
-                    rrule=f"RRULE:FREQ=MINUTELY;INTERVAL={state['wait']['interval_minutes']}",
+                    rrule=(one_shot(state['wait']['next_at']) if recovery else
+                           f"RRULE:FREQ=MINUTELY;INTERVAL={state['wait']['interval_minutes']}"),
                     status='ACTIVE' if state['state'] == 'WAITING' else 'PAUSED')
         if state.get('trigger_kind', 'cron') == 'heartbeat':
             spec.update(kind='heartbeat', destination='thread', targetThreadId=state['checker_thread_id'])
@@ -204,6 +303,11 @@ def effects(root, state, *, dispatch=False):
             "若 accepted 不是 true，说明任务已暂停或本次继续已失效，停止本次接续。\n"
             "真实业务失败是需要分析的结果，不是目标已完成。调查原因，在已有授权内决定修复、调整、继续等待或需要用户处理；不自动重复提交。\n"
             + state['continuation'])
+        if delivery.get('cause') == 'provider_failure':
+            message = (f"Goal-await 已核对原会话异常中断，允许恢复第 {recovery['attempts']}/"
+                       f"{recovery['max_attempts']} 次。仅从磁盘产物和最新上下文继续；先核对副作用，"
+                       '不要重跑已完成命令或重新提交外部工作。把输出和补丁拆成较短步骤，及时保存进度。\n'
+                       + message)
         if state.get('observer_mode') == 'same-chat':
             result['local_continuation'] = dict(ticket=delivery['ticket'], prompt=message,
                 acknowledge_command=command(root, 'acknowledge') + ' --ticket ' + ps(delivery['ticket']))
@@ -233,6 +337,55 @@ def act(root, action, **args):
             return dict(objective=state['objective'], workspace=state.get('workspace'),
                         context_summary=state.get('context_summary'), wait=state.get('wait'),
                         last_check=state.get('last_check'), last_decision=state.get('last_decision'))
+        if action == 'recovery-enable':
+            if (os.environ.get('CODEX_THREAD_ID') != state['thread_id'] or state['state'] != 'RUNNING'
+                    or not Path.cwd().samefile(state['workspace'])):
+                return response(root,state,accepted=False,reason='Recovery must be enabled in the running business chat')
+            state['recovery'] = recovery_settings(state['thread_id'],state['workspace'],
+                args.get('recovery_max_attempts',2),args.get('recovery_interval_minutes',2))
+            save(root,state,'recovery_enabled')
+            return response(root,state)
+        if action == 'recover-check':
+            if os.environ.get('CODEX_THREAD_ID') != state['thread_id']:
+                return response(root,state,accepted=False,eligible=False,reason='Not the registered business chat')
+            if state['state'] != 'RUNNING' or args['generation'] != state['generation']:
+                # A stale recovery prompt must never replace a newer WAITING prompt.
+                answer = reject_recovery(root,state,'Inactive or stale recovery generation')
+                if state['state'] not in ['RUNNING','WAITING'] and state.get('automation_id'):
+                    answer['effects'] = effects(root,state)
+                    answer['execute_effects'] = dispatch_code(root,state)
+                return answer
+            recovery = state.get('recovery')
+            if not recovery or not state.get('automation_id'):
+                return reject_recovery(root,state,'Recovery is not armed and bound')
+            if not Path.cwd().samefile(state['workspace']):
+                return reject_recovery(root,state,'Wrong workspace')
+            from recovery_evidence import inspect
+            try:
+                evidence = inspect(recovery['snapshot'],thread_id=state['thread_id'],
+                    workspace=state['workspace'],automation_id=state['automation_id'],since=recovery['since'])
+            except (OSError,ValueError,KeyError,TypeError):
+                return recovery_review(root,state,'无法核实异常中断证据；停止自动恢复，保留目标和产物')
+            if not evidence.get('eligible'):
+                return recovery_review(root,state,'异常恢复未获准：' + evidence.get('reason','unknown evidence'))
+            if evidence['failed_turn_id'] in recovery['handled_turn_ids']:
+                return reject_recovery(root,state,'This failed turn already has a recovery admission',
+                                       evidence['current_turn_id'])
+            if evidence['failed_turn_id'] == state.get('recovery_denied_turn_id'):
+                return recovery_review(root,state,'被拒绝的检查轮次发生错误；不将它转为业务恢复')
+            if recovery['attempts'] >= recovery['max_attempts']:
+                return recovery_review(root,state,'异常恢复次数已用完；目标尚未完成，请检查后手动恢复')
+            if state.get('delivery') and state['delivery']['state'] != 'ACKNOWLEDGED':
+                return recovery_review(root,state,'上次恢复票据未确认；不重复投递或重做业务')
+            recovery['attempts'] += 1
+            recovery['handled_turn_ids'].append(evidence['failed_turn_id'])
+            recovery['last_failure_kind'] = evidence['failure_kind']
+            recovery['last_probe_turn_id'] = evidence['current_turn_id']
+            arm_recovery(state)
+            state['delivery'] = dict(ticket=uuid.uuid4().hex[:16],state='PENDING',cause='provider_failure')
+            save(root,state,'recovery_admitted',failed_turn_id=evidence['failed_turn_id'],
+                 attempt=recovery['attempts'],failure_kind=evidence['failure_kind'])
+            return response(root,state,dispatch=True,eligible=True)
         if action == 'context-update':
             if os.environ.get('CODEX_THREAD_ID') != state['thread_id']:
                 return response(root, state, accepted=False, reason='Only the business chat may update its context')
@@ -272,7 +425,9 @@ def act(root, action, **args):
             enter_wait(state, note)
             save(root, state, 'wait_registered', generation=state['generation'])
         elif action == 'bind':
-            if not args['automation_id'] or state['state'] != 'WAITING' or state.get('automation_id') not in [None, args['automation_id']]:
+            if (not args['automation_id'] or not (state['state']=='WAITING' or
+                    state['state']=='RUNNING' and state.get('recovery')) or
+                    state.get('automation_id') not in [None,args['automation_id']]):
                 raise ValueError('Cannot replace a different automation or bind an inactive wait')
             state['automation_id'] = args['automation_id']
             save(root, state, 'automation_bound', automation_id=args['automation_id'])
@@ -292,18 +447,22 @@ def act(root, action, **args):
             else:
                 state.update(state='RUNNING', generation=state['generation'] + 1, delivery=None)
                 state.pop('reason', None)
+                arm_recovery(state)
             state.pop('before_pause', None)
             save(root, state, 'manual_resume', generation=state['generation'])
         elif action in ['check', 'report']:
             if state.get('trigger_kind') == 'heartbeat' and os.environ.get('CODEX_THREAD_ID') != state['checker_thread_id']:
                 return response(root, state, accepted=False, eligible=False, reason='Not the registered checker chat')
             if state['state'] != 'WAITING' or args['generation'] != state['generation']:
-                answer = response(root, state, accepted=False, eligible=False)
+                answer = reject_recovery(root,state,'Inactive or stale waiting generation')
                 if action == 'check' and state['state'] != 'WAITING' and state.get('automation_id'):
                     answer['effects'] = effects(root, state)  # Stop a timer whose earlier pause was delayed.
                     answer['execute_effects'] = dispatch_code(root, state)
                 return answer
             note = state['wait']
+            boundary_error = model_boundary_error(state)
+            if boundary_error:
+                return model_review(root,state,boundary_error)
             if action == 'check':
                 if not state.get('automation_id'):
                     return response(root, state, accepted=False, eligible=False)
@@ -313,6 +472,8 @@ def act(root, action, **args):
                     save(root, state, 'check_limit', reason=state['reason'])
                     return response(root, state, eligible=False)
                 note['checks'] += 1
+                if state.get('recovery'):
+                    note['next_at'] = time.time() + note['interval_minutes'] * 60
                 observation_id = f"{state['generation']}-{note['checks']}"
                 state['active_observation'] = observation_id
                 save(root, state, 'checker_admitted', generation=state['generation'],
@@ -323,7 +484,7 @@ def act(root, action, **args):
                                last_check=state.get('last_check'), last_decision=state.get('last_decision'))
                 return response(root, state, eligible=True, wait=note, context=context,
                                 observation_id=observation_id, instructions=observation_instructions(root, state),
-                                include_effects=False)
+                                include_effects=bool(state.get('recovery')))
             if not args.get('observation_id') or args['observation_id'] != state.get('active_observation'):
                 return response(root, state, accepted=False, reason='No matching admitted observation')
             task_state = args.get('task_state')
@@ -368,7 +529,11 @@ def act(root, action, **args):
                 actual = args.get('thread_id') or os.environ.get('CODEX_THREAD_ID')
                 if state['state'] != 'RUNNING' or delivery['state'] not in ['PENDING', 'DISPATCHING', 'SENT'] or actual != state['thread_id']:
                     return response(root, state, accepted=False)
+                boundary_error = model_boundary_error(state)
+                if boundary_error:
+                    return model_review(root,state,boundary_error)
                 delivery.update(state='ACKNOWLEDGED', acknowledged_by=actual, acknowledged_at=time.time())
+                arm_recovery(state)
             elif action == 'sent':
                 if delivery['state'] != 'ACKNOWLEDGED':
                     delivery['state'] = 'SENT'
@@ -388,7 +553,8 @@ def act(root, action, **args):
             save(root, state, 'goal_completed', summary=args['reason'])
         else:
             raise ValueError('Unknown action')
-        return response(root, state, include_effects=action not in ['bind', 'claim', 'sent', 'acknowledge'])
+        return response(root, state, include_effects=(action not in ['bind', 'claim', 'sent', 'acknowledge'] or
+                         action=='acknowledge' and bool(state.get('recovery'))))
 
 
 def main():
@@ -397,7 +563,8 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('action', choices=['create', 'wait', 'status', 'bind', 'pause', 'resume', 'blocked',
                                      'complete', 'check', 'report', 'claim', 'sent', 'delivery-error',
-                                     'acknowledge', 'effects', 'context', 'context-update', 'turn-ended'])
+                                     'acknowledge', 'effects', 'context', 'context-update', 'turn-ended',
+                                     'recovery-enable', 'recover-check'])
     targets = p.add_mutually_exclusive_group()
     targets.add_argument('--run', type=Path)
     targets.add_argument('--run-id')
@@ -430,6 +597,8 @@ def main():
     p.add_argument('--ticket')
     p.add_argument('--turn-id')
     p.add_argument('--turn-status', choices=['completed','interrupted','failed'])
+    p.add_argument('--recovery-max-attempts',type=int,default=2)
+    p.add_argument('--recovery-interval-minutes',type=int,default=2)
     a = vars(p.parse_args())
     action, root, run_id = a.pop('action'), a.pop('run'), a.pop('run_id')
     try:

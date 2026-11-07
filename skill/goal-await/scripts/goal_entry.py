@@ -11,7 +11,8 @@ from common import atomic_json, exclusive
 
 from settings import WORKSPACE, DATA, SCOPE
 BINDINGS = DATA / 'bindings'
-ACTIONS = {'wait','pause','resume','complete','blocked','status','context','context-update','bind','effects'}
+ACTIONS = {'wait','pause','resume','complete','blocked','status','context','context-update','bind','effects',
+           'recovery-enable','recover-check'}
 
 
 def binding_path(thread_id, bindings=BINDINGS):
@@ -32,7 +33,8 @@ def current(thread_id, bindings=BINDINGS):
     return root
 
 
-def start(objective,thread_id,*,workspace=None,context_summary='',project_id='local',bindings=BINDINGS):
+def start(objective,thread_id,*,workspace=None,context_summary='',project_id='local',bindings=BINDINGS,
+          recover_errors=False,recovery_max_attempts=2,recovery_interval_minutes=2):
     if not objective or not objective.strip():
         raise ValueError('A concrete objective is required')
     workspace=Path(workspace or Path.cwd()).resolve()
@@ -53,16 +55,20 @@ def start(objective,thread_id,*,workspace=None,context_summary='',project_id='lo
             if (parent/'.git').exists():
                 break
     path=binding_path(thread_id,bindings)
+    recovery = (goal_await.recovery_settings(thread_id,workspace,recovery_max_attempts,
+                recovery_interval_minutes) if recover_errors else None)
     path.parent.mkdir(parents=True,exist_ok=True)
     with exclusive(path.with_suffix('.lock')):
         previous=current(thread_id,bindings)
         if previous and goal_await.load(previous)['state']!='DONE':
             raise ValueError('This chat already has an unfinished goal; resume or finish it first')
         root=goal_await.create(objective.strip(),thread_id,project_id,workspace=workspace,
-                              context_summary=context_summary)
+                              context_summary=context_summary,recovery=recovery)
         atomic_json(path,dict(thread_id=thread_id,run_id=root.name))
-    return dict(accepted=True,run=str(root),run_id=root.name,state='RUNNING',
-                binding=str(path),effects={},next_step='继续完整目标；需要等待时调用 wait；完整验收后 complete。')
+    return dict(accepted=True,run=str(root),run_id=root.name,state='RUNNING',binding=str(path),
+                effects=goal_await.effects(root,goal_await.load(root)),
+                next_step='先执行返回的原生定时操作并 bind 实际 ID，再继续目标；需要等待时 wait，验收后 complete。'
+                          if recovery else '继续完整目标；需要等待时调用 wait；完整验收后 complete。')
 
 
 def main():
@@ -76,11 +82,14 @@ def main():
             p.add_argument('--workspace',type=Path)
             p.add_argument('--context-summary',default='')
             p.add_argument('--project-id',default='local')
+            p.add_argument('--recover-errors',action='store_true')
+            p.add_argument('--recovery-max-attempts',type=int,default=2)
+            p.add_argument('--recovery-interval-minutes',type=int,default=2)
             args=vars(p.parse_args(sys.argv[2:]))
             print(json.dumps(start(thread_id=thread_id,**args),ensure_ascii=False,indent=2))
             return
         if action not in ACTIONS:
-            raise ValueError('Use start, wait, pause, resume, complete, blocked, status, context, context-update, bind or effects')
+            raise ValueError('Unknown Goal-await action')
         # Targets come from the current conversation, never from typed chat/run IDs.
         if any(a.split('=')[0] in ['--run','--run-id','--thread-id'] for a in sys.argv[2:]):
             raise ValueError('This entry automatically selects the current chat goal')

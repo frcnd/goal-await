@@ -23,31 +23,42 @@ description: 用 Goal-await 在当前桌面对话持续推进明确目标，安�
 
 判断命令结果时同时检查退出码、stdout 中的 JSON 和 stderr，不把单条警告当作失败。Windows Python 可能输出 `Failed to find real location of ...`：这表示启动时查询最终路径失败，并不证明可执行文件不存在。若退出码为 0 且返回有效的预期 JSON，按返回状态继续；若非零、缺少预期结果或 JSON 含错误，再调查路径、权限与具体错误。不要屏蔽全部 stderr、自动更换 Python 或关闭沙箱。用户级状态写入被拒绝时，使用宿主正常审批流程。
 
-用户级状态在安装记录指定的用户数据目录，可能需要宿主批准该目录的读写；不得自行关闭沙箱或扩大其他目录权限。若当前项目仍有同名项目级安装，先保留它的状态并处理安装范围冲突，不双重启动。旧目标已完成且宿主已删除其 heartbeat 时，不对旧 ID 更新或重建任务；只有新目标第一次等待才创建新任务。
+用户级状态在安装记录指定的用户数据目录，可能需要宿主批准该目录的读写；不得自行关闭沙箱或扩大其他目录权限。若当前项目仍有同名项目级安装，先保留它的状态并处理安装范围冲突，不双重启动。旧目标已完成且宿主已删除其 heartbeat 时，不对旧 ID 更新或重建任务；新目标第一次启用异常恢复或登记等待时创建任务。
 
 用户可以用中文、英文或其模型理解的语言，例如 `$goal-await 开始……`、`$goal-await wait……`。不需要手动逐步输入等待和完成；完整目标已明确时按进度自行处理。以下是脚本动作，不是新增的内置 `/goal`。
 
 | 用户意图 | 脚本动作与输入 |
 |---|---|
-| 开始 | `start --objective '完整目标及验收标准' --workspace '当前对话目录' --context-summary '进展、下一步、证据入口'` |
+| 开始 | `start --objective '完整目标及验收标准' --workspace '当前对话目录' --context-summary '进展、下一步、证据入口' --recover-errors` |
 | 等待 | `wait --waiting-for '在等什么' --completion '怎样算完成' --result-location '结果/日志/查询位置'`；按任务安排 interval-minutes、timeout-minutes、max-checks，可加 guide |
 | 暂停 | `pause --reason '用户原因'` |
 | 恢复 | `resume`，恢复当前目标或原等待，不重新提交业务作业 |
 | 完成 | 独立核对完整目标后 `complete --reason '验收依据'` |
 | 需用户处理 | `blocked --reason '缺少的必要输入、授权或具体边界'` |
 | 查看/摘要 | `status`；`context-update --context-summary '最新进展' --decision '最近决定'` |
+| 为旧目标启用异常恢复 | 在原会话继续工作时调用 `recovery-enable`，再同步 effects；不借此自动重启其他会话 |
 
 如果已有未完成目标，继续或恢复它，不用新目标绕过暂停。开始后立即做已授权工作，Stop 会在 RUNNING 且模型准备停止时提醒继续；等待、暂停、blocked、完成允许结束本轮。单轮接续和观察预算耗尽会进入 NEEDS_REVIEW，应说明原因。用户中断后保持停止。
+
+## 异常中断恢复
+
+新目标默认按上表加 `--recover-errors`；用户要求不安排恢复时省略。默认最多恢复两次、两分钟后检查，可用 `--recovery-max-attempts 1..5`、`--recovery-interval-minutes 1..60` 调整。旧目标缺少恢复字段时保持原行为。`resume` 不重置已消耗的恢复次数；用户明确要求重新给恢复预算时，才调用 `recovery-enable`。
+
+开始后先同步并绑定原生 heartbeat，再做业务。它只预约一次唤醒；获准恢复后才预约下一次，与 WAITING 共用同一个 ID。启用恢复的目标在 WAITING 也逐次预约，每次 check 获准后先同步下一次定时效果，防止检查模型在首条命令前失败时反复触发。准入依据是当前会话本地记录中明确的 `max_output_tokens` 或已识别的响应流提前断开，不能用“很久没更新”推断失败。正常收尾仍交给 Stop，业务失败、未知错误、用户中断和模型变化均不自动恢复。恢复前核对已落盘的文件和命令副作用，接着做未完成部分，不重放整轮工作。
+
+heartbeat 首先执行 `recover-check` 并核对返回值；准入失败只处理返回的暂停效果。获准时先同步下一次定时操作，再执行 local_continuation 的 acknowledge_command，确认 accepted=true 后继续。最后一次恢复后的单次检查只可确认停止，不得增加恢复次数。若模型在执行准入或重新预约之前就失败，单次调度耗尽后不会继续唤醒，应如实报告需要手动继续。
+
+当前恢复证据适配本地 Codex 会话记录；格式无法识别时停止恢复。宿主 heartbeat 可能因模型不可用而选择其他模型，脚本会拒绝继续业务，但不能阻止宿主已经发出的这一次检查请求。不要改模型、provider、登录、信任或启动私有守护服务来绕过限制。
 
 ## 原生定时接线
 
 读取动作返回的完整 JSON；effects 表示待执行操作，不代表已安排或已暂停。
 
 1. 加载宿主的 `automation_update`，按 `effects.automation` 原字段执行。保留 prompt、等待版本、rrule、目标对话、kind、status、mode 和已有 id，不改模型。没有效果就不调用。
-2. 首次创建必须直接调用原生工具、读取实际 ID，再用 `bind --automation-id '实际ID'` 保存。回执不明确先查看准确任务，不重复创建。以后 wait、pause、resume、blocked、complete 复用此 ID。
+2. 首次创建必须直接调用原生工具、读取实际 ID，再用 `bind --automation-id '实际ID'` 保存。回执不明确先查看准确任务，不重复创建。以后异常恢复、wait、pause、resume、blocked、complete 复用此 ID。acknowledge 返回定时效果时也须同步。
 3. 原生工具失败时说明失败，保留状态，不声称操作成功，不启动替代私有计时服务或扩大权限。返回 accepted=false 但含暂停效果时，仍处理这项暂停。
 
-原生 heartbeat 执行短 check 入口。读取本轮准入返回的 context/instructions/observation_id，自主只读调查已有文件、日志、进程或获授权的接口；检查脚本只是可选证据。工具错误不证明业务失败或 blocked，无实质变化保持安静，完成、真实失败或需用户处理才通知。
+等待阶段的原生 heartbeat 执行短 check 入口。先同步返回的定时效果，再读取本轮准入的 context/instructions/observation_id，自主只读调查已有文件、日志、进程或获授权的接口；检查脚本只是可选证据。启用异常恢复的目标还会在 check、report 和 acknowledge 核对实际模型。工具错误不证明业务失败或 blocked，无实质变化保持安静，完成、真实失败或需用户处理才通知。
 
 report 严格绑定本轮编号和等待版本。就绪/真实失败后先执行返回的定时暂停；有 local_continuation 时，在本对话执行其 acknowledge_command，再继续完整目标。不要向自己发送消息，不调用 claim/sent。业务失败交回本对话分析，不自动重跑，不把它当完整目标完成。
 
