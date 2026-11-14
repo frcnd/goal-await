@@ -2,6 +2,14 @@
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
+## 0.3.1-preview - 2026-11-14
+
+- Allow manual model changes and host fallback chains during recovery, waiting, acknowledgement, and Stop continuation. Model selection remains with the host and user configuration.
+- Remove the model consistency gate without rebinding goals or resetting recovery attempts. Existing model snapshots are diagnostic only; interruption, chat, workspace, acknowledgement, and retry-budget checks remain in place.
+- Validated with all 85 offline tests on 2026-11-14, covering model changes in recovery, waiting, acknowledgement, and Stop. Live acceptance of model changes remains pending; the historical same-model recovery observation does not establish fallback recovery.
+
+Upgrade using the pause, uninstall, install, trust, and reload procedure in `0.3.0-preview` below. Existing goals do not restart automatically.
+
 ## 0.3.0-preview - 2026-11-14
 
 - Check new business tool activity before Stop continuation. Allow one correction for a text-only manual turn, then request review if there is still no activity.

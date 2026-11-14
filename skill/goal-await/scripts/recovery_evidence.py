@@ -309,7 +309,10 @@ def _aborted(events: list[dict[str, Any]], start: int, turn_id: str) -> bool:
 
 
 def capture(thread_id: str, workspace: Any, codex_home: Any = None) -> dict[str, Any]:
-    """Pin the active user-facing turn and model from one exact transcript."""
+    """Pin the active user-facing turn from one exact transcript.
+
+    A model recorded in turn context is optional diagnostic metadata.
+    """
     thread_id = _thread(thread_id)
     workspace_key = _workspace_key(workspace)
     path = _locate(thread_id, codex_home)
@@ -325,19 +328,22 @@ def capture(thread_id: str, workspace: Any, codex_home: Any = None) -> dict[str,
     if any(payload.get("turn_id") == start["turn_id"] for _, payload in _events(events, "task_complete")):
         raise ValueError("transcript has no currently active turn")
     context = _context(events, start["turn_id"], after=start_index, before=len(events))
-    if not context or not isinstance(context.get("model"), str) or not context["model"].strip():
-        raise ValueError("active turn context has no model")
+    if not context:
+        raise ValueError("active turn context is missing")
     if context.get("cwd") is not None and _workspace_key(context["cwd"]) != workspace_key:
         raise ValueError("active turn context belongs to a different workspace")
-    return {
+    snapshot = {
         "transcript_path": str(path),
-        "model": context["model"],
         "turn_id": start["turn_id"],
         "cli_version": meta["cli_version"],
         "interrupted": _aborted(events, start_index, start["turn_id"]),
         "prior_interrupted": (trigger in _HEARTBEAT_TRIGGERS and len(starts) > 1
                               and _aborted(events, starts[-2][0], starts[-2][1]["turn_id"])),
     }
+    model = context.get("model")
+    if isinstance(model, str) and model.strip():
+        snapshot["model"] = model
+    return snapshot
 
 
 def _no(reason: str, **detail: Any) -> dict[str, Any]:
@@ -349,7 +355,7 @@ def inspect(
     automation_id: str, since: Any,
 ) -> dict[str, Any]:
     """Return true only when the transcript proves this heartbeat continues a
-    pinned model after one recognized recoverable failure since ``since``.
+    pinned turn after one recognized recoverable failure since ``since``.
     """
     try:
         thread_id = _thread(thread_id)
@@ -357,12 +363,10 @@ def inspect(
         if not isinstance(snapshot, dict):
             return _no("evidence snapshot is invalid")
         path_value = snapshot.get("transcript_path")
-        pinned_model = snapshot.get("model")
+        snapshot_model = snapshot.get("model")
         snapshot_turn = snapshot.get("turn_id")
         if not isinstance(path_value, str) or not path_value:
             return _no("evidence snapshot has no transcript path")
-        if not isinstance(pinned_model, str) or not pinned_model.strip():
-            return _no("evidence snapshot has no pinned model")
         if not isinstance(snapshot_turn, str) or not snapshot_turn:
             return _no("evidence snapshot has no pinned turn")
         if not isinstance(automation_id, str) or not automation_id:
@@ -399,10 +403,8 @@ def inspect(
         return _no("current heartbeat turn was interrupted", current_turn_id=current_turn)
 
     current_context = _context(events, current_turn, after=current_index, before=len(events))
-    if not current_context or not isinstance(current_context.get("model"), str):
+    if not current_context:
         return _no("current turn context is missing", current_turn_id=current_turn)
-    if current_context["model"] != pinned_model:
-        return _no("current turn model does not match the pinned model", current_turn_id=current_turn)
     if current_context.get("cwd") is None or _workspace_key(current_context.get("cwd")) != workspace_key:
         return _no("current turn context belongs to a different workspace", current_turn_id=current_turn)
 
@@ -429,8 +431,8 @@ def inspect(
     previous_context = _context(
         events, previous_turn, after=previous_index, before=previous_completion_index,
     )
-    if not previous_context or previous_context.get("model") != pinned_model:
-        return _no("prior turn model does not match the pinned model", current_turn_id=current_turn)
+    if not previous_context:
+        return _no("prior turn context is missing", current_turn_id=current_turn)
     if previous_context.get("cwd") is None or _workspace_key(previous_context.get("cwd")) != workspace_key:
         return _no("prior turn context belongs to a different workspace", current_turn_id=current_turn)
     completed_at = _event_time(events[previous_completion_index], previous_completion)
@@ -442,11 +444,13 @@ def inspect(
     failure_kind = _failure_kind(message) if message else None
     if failure_kind is None:
         return _no("prior terminal error is not recoverable", current_turn_id=current_turn)
-    return {
+    evidence = {
         "eligible": True,
         "reason": "recoverable prior turn and matching heartbeat",
         "current_turn_id": current_turn,
         "failed_turn_id": previous_turn,
         "failure_kind": failure_kind,
-        "model": pinned_model,
     }
+    if isinstance(snapshot_model, str) and snapshot_model.strip():
+        evidence["model"] = snapshot_model
+    return evidence

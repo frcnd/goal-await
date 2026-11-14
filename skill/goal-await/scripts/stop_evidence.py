@@ -288,12 +288,6 @@ def assess(event: dict[str, Any], state: dict[str, Any],
                 and mode["mode"].casefold() == "plan"):
             return _result("plan", "plan_mode", turn_id,
                            current_cursor, automatic_turn, 0)
-        if snapshot:
-            pinned_model = snapshot.get("model")
-            if not isinstance(pinned_model, str) or not pinned_model:
-                return _unknown("invalid_model", turn_id, cursor)
-            if context.get("model") != pinned_model:
-                return _unknown("model_mismatch", turn_id, cursor)
         if isinstance(previous, dict) and previous.get("turn_id") == turn_id:
             if not prior_cursor:
                 # Older stop_hook records have no cursor.  Their prior Stop

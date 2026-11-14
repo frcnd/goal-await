@@ -249,7 +249,7 @@ class StopEvidenceTests(unittest.TestCase):
         self.assertEqual(interrupted["kind"], "interrupted")
         self.assertFalse(interrupted["automatic"])
 
-    def test_foreign_metadata_model_and_turn_mismatches_fail_closed(self):
+    def test_foreign_metadata_and_turn_mismatches_fail_closed(self):
         self.start()
         self.state["thread_id"] = "44444444-4444-4444-4444-444444444444"
         self.assertEqual(self.assess()["kind"], "unknown")
@@ -258,9 +258,21 @@ class StopEvidenceTests(unittest.TestCase):
         self.start("99999999-9999-9999-9999-999999999999")
         self.assertEqual(self.assess()["kind"], "unknown")
 
-        self.state = self.make_state()
-        self.state["recovery"]["snapshot"]["model"] = "different/model"
-        self.assertEqual(self.assess()["kind"], "unknown")
+    def test_model_changes_and_absent_model_do_not_hide_activity(self):
+        for recorded_model, current_model in [(MODEL, "fallback/model"),
+                                               (None, MODEL), (MODEL, None)]:
+            with self.subTest(recorded_model=recorded_model, current_model=current_model):
+                self.reset_transcript()
+                self.state = self.make_state()
+                if recorded_model is None:
+                    self.state["recovery"]["snapshot"].pop("model")
+                self.start()
+                context = dict(turn_id=TURN, cwd=str(self.workspace))
+                if current_model is not None:
+                    context["model"] = current_model
+                self.append("turn_context", **context)
+                self.item("CommandExecution", "verify", command=["python", "verify.py"], exit_code=0)
+                self.assertEqual(self.assess()["kind"], "activity")
 
     def test_partial_tail_and_missing_cursor_are_unknown(self):
         self.start()

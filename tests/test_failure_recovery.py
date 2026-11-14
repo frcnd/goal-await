@@ -60,13 +60,19 @@ class FailureRecovery(unittest.TestCase):
     def start_turn(self, turn_id, trigger, model=MODEL, automation_id='fixture-timer'):
         self.append('event_msg', type='task_started', turn_id=turn_id,
                     turn_attribution=dict(turn_id=turn_id, turn_trigger=trigger))
-        self.append('turn_context', turn_id=turn_id, cwd=str(self.project), model=model)
+        self.change_model(turn_id, model)
         if trigger.startswith('automation_heartbeat_'):
             self.append('response_item', type='message', role='user',
                         content=[dict(type='input_text', text='<heartbeat>\n<automation_id>' +
                             automation_id + '</automation_id>\n</heartbeat>')],
                         internal_chat_message_metadata_passthrough=dict(turn_id=turn_id,
                             content_item_metadata=[dict(provenance=dict(type='user'))]))
+
+    def change_model(self, turn_id, model):
+        context = dict(turn_id=turn_id, cwd=str(self.project))
+        if model is not None:
+            context['model'] = model
+        self.append('turn_context', **context)
 
     def finish(self, turn_id, error=ERROR):
         self.append('event_msg', type='task_complete', turn_id=turn_id,
@@ -79,7 +85,7 @@ class FailureRecovery(unittest.TestCase):
         return self.call(self.core, 'acknowledge', '--run-id', self.run_id,
                          '--ticket', receipt['effects']['ticket'])
 
-    def test_one_shot_budget_and_preserved_model(self):
+    def test_one_shot_budget_and_diagnostic_snapshot_model(self):
         spec = self.goal['effects']['automation']
         self.assertEqual(spec['targetThreadId'], CHAT)
         self.assertEqual(spec['kind'], 'heartbeat')
@@ -119,7 +125,18 @@ class FailureRecovery(unittest.TestCase):
         self.assertEqual(duplicate['effects'], {})
         self.assertEqual(json.loads(self.state_path.read_text())['recovery']['attempts'], 1)
 
-    def test_model_drift_and_unknown_error_do_not_admit(self):
+    def test_failure_across_manual_model_change_and_heartbeat_fallback_is_admitted(self):
+        self.change_model('original', 'manually/selected-model')
+        self.finish('original')
+        self.start_turn('fallback', 'automation_heartbeat_scheduled', model='host/fallback-model')
+        receipt = self.check()
+        self.assertTrue(receipt['eligible'], receipt)
+        self.assertEqual(receipt['effects']['automation']['status'], 'ACTIVE')
+        state = json.loads(self.state_path.read_text())
+        self.assertEqual(state['recovery']['attempts'], 1)
+        self.assertEqual(state['recovery']['snapshot']['model'], MODEL)
+
+    def test_unknown_error_does_not_admit_after_a_model_change(self):
         self.finish('original', error='unauthorized')
         self.start_turn('tick', 'automation_heartbeat_scheduled', model='different-model')
         receipt = self.check()
@@ -209,30 +226,34 @@ class FailureRecovery(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {})
 
-    def test_waiting_and_ack_refuse_a_fallback_model(self):
+    def test_waiting_check_report_and_ack_allow_model_changes(self):
         self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
                   '--result-location', 'fixture.json')
+        self.change_model('original', 'manually/check-model')
         admitted = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')
+        self.assertTrue(admitted['eligible'], admitted)
+        self.change_model('original', 'manually/report-model')
         result = self.call(self.core, 'report', '--run-id', self.run_id, '--generation', '1',
             '--observation-id', admitted['observation_id'], '--task-state', 'completed',
             '--reason', 'fixture ready', '--evidence', 'offline file')
+        self.assertEqual(result['effects']['automation']['status'], 'PAUSED')
         self.finish('original', error=None)
-        self.start_turn('fallback', 'automation_heartbeat_scheduled', model='other-model')
-        rejected = self.ack(result)
-        self.assertFalse(rejected['accepted'])
-        self.assertEqual(rejected['effects']['automation']['status'], 'PAUSED')
-        self.assertEqual(rejected['state'], 'NEEDS_REVIEW')
-        self.assertEqual(json.loads(self.state_path.read_text())['delivery']['state'], 'PENDING')
+        self.start_turn('fallback', 'automation_heartbeat_scheduled', model='host/ack-model')
+        accepted = self.ack(result)
+        self.assertTrue(accepted['accepted'])
+        self.assertEqual(accepted['effects']['automation']['status'], 'ACTIVE')
+        self.assertEqual(accepted['state'], 'RUNNING')
+        self.assertEqual(json.loads(self.state_path.read_text())['delivery']['state'], 'ACKNOWLEDGED')
 
-    def test_waiting_check_refuses_a_fallback_before_observation(self):
+    def test_waiting_check_accepts_a_heartbeat_without_model_context(self):
         self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
                   '--result-location', 'fixture.json')
         self.finish('original', error=None)
-        self.start_turn('fallback', 'automation_heartbeat_scheduled', model='other-model')
-        rejected = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')
-        self.assertFalse(rejected['eligible'])
-        self.assertEqual(rejected['effects']['automation']['status'], 'PAUSED')
-        self.assertEqual(json.loads(self.state_path.read_text())['wait']['checks'], 0)
+        self.start_turn('fallback', 'automation_heartbeat_scheduled', model=None)
+        admitted = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')
+        self.assertTrue(admitted['eligible'], admitted)
+        self.assertEqual(admitted['effects']['automation']['status'], 'ACTIVE')
+        self.assertEqual(json.loads(self.state_path.read_text())['wait']['checks'], 1)
 
     def test_waiting_before_gate_failure_has_no_recurring_schedule(self):
         waiting = self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',

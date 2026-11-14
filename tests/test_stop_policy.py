@@ -206,6 +206,19 @@ class StopPolicy(unittest.TestCase):
                 content_item_metadata=[dict(provenance=dict(type='tool',namespace='multi_agent_v1'))])))
         self.assertEqual(self.stop()['decision'],'block')
 
+    def test_recovery_snapshot_does_not_block_stop_after_model_switch(self):
+        self.run_cli(self.scripts/'goal_entry.py','recovery-enable')
+        self.append('turn_context',dict(turn_id=TURN,cwd=str(self.project),model='new-model'))
+        self.command()
+        self.assertEqual(self.stop()['decision'],'block')
+        self.assertEqual(self.state()['state'],'RUNNING')
+        self.assertEqual(self.state()['recovery']['attempts'],0)
+        self.append('turn_context',dict(turn_id=TURN,cwd=str(self.project)))
+        self.command('python verify_second_artifact.py')
+        self.assertEqual(self.stop()['decision'],'block')
+        self.assertEqual(self.state()['stop_hook']['continuations'],2)
+        self.assertEqual(self.state()['recovery']['attempts'],0)
+
     def test_existing_pause_remains_authoritative(self):
         self.run_cli(self.scripts/'goal_entry.py','pause','--reason','fixture user pause')
         self.command()

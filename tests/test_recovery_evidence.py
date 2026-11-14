@@ -59,9 +59,10 @@ class RecoveryEvidence(unittest.TestCase):
         self.records.append(self.record("event_msg", payload))
 
     def context(self, turn, model=MODEL):
-        self.records.append(self.record("turn_context", {
-            "turn_id": turn, "model": model, "cwd": str(self.workspace),
-        }))
+        payload = {"turn_id": turn, "cwd": str(self.workspace)}
+        if model is not None:
+            payload["model"] = model
+        self.records.append(self.record("turn_context", payload))
 
     def complete(self, turn, error=None, completed_at=1010):
         payload = {"type": "task_complete", "turn_id": turn, "completed_at": completed_at}
@@ -86,14 +87,15 @@ class RecoveryEvidence(unittest.TestCase):
         }))
 
     def heartbeat(self, *, error=MAX_OUTPUT, attribution=False, event_only=False,
-                  trigger="automation_heartbeat_scheduled"):
+                  trigger="automation_heartbeat_scheduled", failed_model=MODEL,
+                  heartbeat_model=MODEL):
         self.start("old-turn", "composer")
-        self.context("old-turn")
+        self.context("old-turn", failed_model)
         self.write()
         snapshot = evidence.capture(CHAT, self.workspace, self.home)
         self.complete("old-turn", error)
         self.start("heartbeat", trigger, attribution=attribution)
-        self.context("heartbeat")
+        self.context("heartbeat", heartbeat_model)
         self.user("heartbeat", "Continue <automation_id>auto-1</automation_id>", event_only=event_only)
         self.write()
         return snapshot
@@ -114,6 +116,22 @@ class RecoveryEvidence(unittest.TestCase):
         self.assertEqual(snapshot["cli_version"], "0.167.0-alpha.3.2")
         self.assertEqual(Path(snapshot["transcript_path"]), self.session.resolve())
 
+    def test_capture_allows_a_model_change_after_turn_start(self):
+        self.start("main", "composer")
+        self.context("main")
+        self.context("main", "manually/selected-model")
+        self.write()
+        snapshot = evidence.capture(CHAT, self.workspace, self.home)
+        self.assertEqual(snapshot["model"], "manually/selected-model")
+
+    def test_capture_omits_a_missing_model(self):
+        self.start("main", "composer")
+        self.context("main", None)
+        self.write()
+        snapshot = evidence.capture(CHAT, self.workspace, self.home)
+        self.assertNotIn("model", snapshot)
+        self.assertEqual(snapshot["turn_id"], "main")
+
     def test_eligible_max_output_tokens(self):
         result = self.inspect(self.heartbeat())
         self.assertTrue(result["eligible"], result)
@@ -128,6 +146,31 @@ class RecoveryEvidence(unittest.TestCase):
         result = self.inspect(snapshot)
         self.assertTrue(result["eligible"], result)
         self.assertEqual(result["failure_kind"], "stream_disconnected_before_completion")
+
+    def test_models_may_change_around_failure_and_host_fallback(self):
+        snapshot = self.heartbeat(
+            failed_model="manually/selected-model", heartbeat_model="host/fallback-model",
+        )
+        result = self.inspect(snapshot)
+        self.assertTrue(result["eligible"], result)
+        self.assertEqual(result["model"], "manually/selected-model")
+
+    def test_snapshot_and_turn_context_models_are_optional_diagnostics(self):
+        snapshot = self.heartbeat(failed_model=None, heartbeat_model=None)
+        self.assertNotIn("model", snapshot)
+        result = self.inspect(snapshot)
+        self.assertTrue(result["eligible"], result)
+        self.assertNotIn("model", result)
+
+    def test_snapshot_model_does_not_pin_context_models(self):
+        snapshot = self.heartbeat()
+        for item in self.records:
+            if item.get("type") == "turn_context":
+                item["payload"].pop("model", None)
+        self.write()
+        result = self.inspect(snapshot)
+        self.assertTrue(result["eligible"], result)
+        self.assertEqual(result["model"], MODEL)
 
     def test_run_now_heartbeat_trigger_is_eligible(self):
         snapshot = self.heartbeat(
@@ -164,8 +207,8 @@ class RecoveryEvidence(unittest.TestCase):
         self.write()
         self.assertIn("prior turn was interrupted", self.inspect(snapshot)["reason"])
 
-    def test_interruption_and_model_mismatch_are_rejected(self):
-        snapshot = self.heartbeat()
+    def test_interruption_is_rejected_after_a_model_change(self):
+        snapshot = self.heartbeat(heartbeat_model="different/model")
         self.records.append(self.record("response_item", {
             "type": "message", "role": "user", "content": [],
             "internal_chat_message_metadata_passthrough": {
@@ -174,12 +217,6 @@ class RecoveryEvidence(unittest.TestCase):
         }))
         self.write()
         self.assertIn("interrupted", self.inspect(snapshot)["reason"])
-
-        self.records = self.records[:6] + [self.record("turn_context", {
-            "turn_id": "heartbeat", "model": "different/model", "cwd": str(self.workspace),
-        })] + self.records[7:-1]
-        self.write()
-        self.assertIn("model", self.inspect(snapshot)["reason"])
 
     def test_unknown_error_and_old_completion_are_rejected(self):
         snapshot = self.heartbeat(error="rate limit exceeded")

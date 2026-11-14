@@ -104,7 +104,7 @@ def create(objective, thread_id, project_id, *, checker_thread_id=None, root=Non
 
 
 def recovery_settings(thread_id, workspace, max_attempts=2, interval_minutes=2):
-    """Opt in only with current-chat evidence; never guess a model or transcript."""
+    """Opt in only with current-chat evidence; never guess the transcript."""
     if not 1 <= max_attempts <= 5 or not 1 <= interval_minutes <= 60:
         raise ValueError('Recovery requires 1..5 attempts and a 1..60 minute interval')
     from recovery_evidence import capture
@@ -126,25 +126,23 @@ def one_shot(at):
     return 'RDATE:' + when
 
 
-def model_boundary_error(state):
+def continuation_boundary_error(state):
     if not state.get('recovery'):
         return None
     from recovery_evidence import capture
     try:
         actual = capture(state['thread_id'],state['workspace'])
     except (OSError,ValueError):
-        return '无法核实当前检查模型，停止自动推进'
+        return '无法核实当前继续轮次，停止自动推进'
     if actual.get('interrupted') or actual.get('prior_interrupted'):
         return '原会话被用户中断，停止自动推进'
-    if actual['model'] != state['recovery']['snapshot']['model']:
-        return '当前检查模型与目标绑定模型不一致，停止自动推进'
     return None
 
 
-def model_review(root, state, reason):
+def continuation_review(root, state, reason):
     state.update(before_pause=state['state'],state='NEEDS_REVIEW',reason=reason)
     state['generation'] += 1
-    save(root,state,'model_boundary_stopped',reason=reason)
+    save(root,state,'continuation_boundary_stopped',reason=reason)
     answer = response(root,state,eligible=False,reason=reason)
     answer['accepted'] = False  # Preserve pause effects even for a rejected ACK.
     return answer
@@ -156,7 +154,7 @@ def recovery_prompt(root, state):
             '命令失败或 eligible/accepted 不是 true 时，不推进业务；只同步实际返回的定时操作并结束。'
             '获准时先同步 effects.automation，再执行 local_continuation.acknowledge_command，'
             '只有确认成功才按 local_continuation.prompt 在本对话继续。'
-            '不向自己发消息，不改模型，不重复业务提交。')
+            '不向自己发消息，不重复业务提交。')
 
 
 def recovery_review(root, state, reason):
@@ -177,7 +175,7 @@ def reject_recovery(root, state, reason, turn_id=None):
             except (OSError,ValueError):
                 return recovery_review(root,state,'无法核实被拒绝的恢复轮次；停止自动恢复')
             if current.get('interrupted') or current.get('prior_interrupted'):
-                return model_review(root,state,'原会话被用户中断，停止自动推进')
+                return continuation_review(root,state,'原会话被用户中断，停止自动推进')
             turn_id = current['turn_id']
         state['recovery_denied_turn_id'] = turn_id
         save(root,state,'recovery_denied',turn_id=turn_id,reason=reason)
@@ -197,7 +195,7 @@ def enter_wait(state, note):
 
 
 def checker_prompt(root, state):
-    return (f"Goal-await {state['run_id']}：本轮只执行下列准入命令，不改模型，不执行历史等待命令。\n"
+    return (f"Goal-await {state['run_id']}：本轮只执行下列准入命令，不执行历史等待命令。\n"
             f"{command(root, 'check')} --generation {state['generation']}\n"
             "读取 JSON 的 context、instructions 和 observation_id；先同步返回的定时操作，再自主只读调查，脚本仅为可选证据。"
             "准入失败则执行返回的暂停操作并结束。正常未完成保持安静，只报告实质变化、完成、失败或需要用户行动。")
@@ -460,9 +458,9 @@ def act(root, action, **args):
                     answer['execute_effects'] = dispatch_code(root, state)
                 return answer
             note = state['wait']
-            boundary_error = model_boundary_error(state)
+            boundary_error = continuation_boundary_error(state)
             if boundary_error:
-                return model_review(root,state,boundary_error)
+                return continuation_review(root,state,boundary_error)
             if action == 'check':
                 if not state.get('automation_id'):
                     return response(root, state, accepted=False, eligible=False)
@@ -529,9 +527,9 @@ def act(root, action, **args):
                 actual = args.get('thread_id') or os.environ.get('CODEX_THREAD_ID')
                 if state['state'] != 'RUNNING' or delivery['state'] not in ['PENDING', 'DISPATCHING', 'SENT'] or actual != state['thread_id']:
                     return response(root, state, accepted=False)
-                boundary_error = model_boundary_error(state)
+                boundary_error = continuation_boundary_error(state)
                 if boundary_error:
-                    return model_review(root,state,boundary_error)
+                    return continuation_review(root,state,boundary_error)
                 delivery.update(state='ACKNOWLEDGED', acknowledged_by=actual, acknowledged_at=time.time())
                 arm_recovery(state)
             elif action == 'sent':
