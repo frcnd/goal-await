@@ -121,6 +121,7 @@ def check_legacy_install(skill,record):
 
 
 def install(project,python,backup_root,hook_shell=None):
+    source_version=(Path(__file__).resolve().parent/'VERSION').read_text(encoding='utf-8').strip()
     project,skill,hook,record=paths(project)
     check_legacy_install(project/'.agents/skills/goal-lite',project/'.goal-lite/install.json')
     if skill.exists() or (record.exists() and not json.loads(record.read_text(encoding='utf-8')).get('uninstalled')):
@@ -174,7 +175,7 @@ def install(project,python,backup_root,hook_shell=None):
             change(project/'.gitignore',(ignore+('' if not ignore or ignore.endswith('\n') else '\n')+
                                          '\n'.join(additions)+'\n').encode('utf-8'),changes)
         result=dict(schema_version=1,workspace=str(project),backup=str(backup),handler=group['hooks'][0],
-            source_version='0.1.0-preview',hook_existed=original_hook is not None,ignore_existed=original_ignore is not None,
+            source_version=source_version,hook_existed=original_hook is not None,ignore_existed=original_ignore is not None,
             before_hook_sha256=before_hook,before_ignore_sha256=before_ignore,
             installed_hook_sha256=digest(hook),installed_ignore_sha256=digest(project/'.gitignore'),
             ignore_additions=additions,skill_files=skill_hashes,trusted=False)

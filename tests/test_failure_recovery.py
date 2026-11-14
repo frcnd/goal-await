@@ -271,6 +271,31 @@ class FailureRecovery(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(json.loads(result.stdout), {})
 
+    def test_progress_aware_stop_preserves_the_exception_recovery_budget(self):
+        self.finish('original')
+        self.start_turn('recovery-1', 'automation_heartbeat_scheduled')
+        admitted = self.check()
+        self.ack(admitted)
+        self.append('event_msg',type='item_completed',thread_id=CHAT,turn_id='recovery-1',item=dict(
+            type='FileChange',id='business-patch',status='completed',
+            changes={str(self.project/'result.txt'):dict(type='add',content='fixture result')}))
+        event = dict(hook_event_name='Stop',session_id=CHAT,turn_id='recovery-1',
+                     cwd=str(self.project),transcript_path=str(self.transcript))
+        def stop():
+            result = subprocess.run([sys.executable,'-B','-X','utf8',str(self.entry.with_name('goal_await_stop.py')),
+                '--bindings',str(self.codex/'goal-await/bindings')],input=json.dumps(event),
+                cwd=self.project,env=self.env,capture_output=True,text=True,encoding='utf-8',timeout=20)
+            self.assertEqual(result.returncode,0,result.stderr)
+            return json.loads(result.stdout)
+        self.assertEqual(stop()['decision'],'block')
+        self.append('event_msg',type='item_completed',thread_id=CHAT,turn_id='recovery-1',item=dict(
+            type='AgentMessage',id='repeated-status',phase='final_answer',content=[dict(type='output_text',text='Continuing.')]))
+        self.assertNotIn('decision',stop())
+        state = json.loads(self.state_path.read_text())
+        self.assertEqual(state['state'],'NEEDS_REVIEW')
+        self.assertEqual(state['recovery']['attempts'],1)
+        self.assertEqual(state['recovery']['max_attempts'],2)
+        self.assertEqual(state['automation_id'],'fixture-timer')
 
 
 if __name__ == '__main__':

@@ -23,7 +23,7 @@ class UserRuntime(unittest.TestCase):
                 (p/'.git').mkdir()  # Independent fixture repo; do not inherit this source repo's installed Skill.
             def run(script,args,cwd,chat=CHAT,ok=True,input=None):
                 p=subprocess.run([sys.executable,'-X','utf8',str(script),*map(str,args)],
-                    cwd=cwd,env=dict(os.environ,CODEX_THREAD_ID=chat),input=input,
+                    cwd=cwd,env=dict(os.environ,CODEX_THREAD_ID=chat,CODEX_HOME=str(codex)),input=input,
                     capture_output=True,text=True,encoding='utf-8',timeout=20)
                 if ok:self.assertEqual(p.returncode,0,p.stderr)
                 else:self.assertNotEqual(p.returncode,0,p.stdout)
@@ -40,6 +40,15 @@ class UserRuntime(unittest.TestCase):
             self.assertEqual(run(entry,['status'],projects[0])['run_id'],first['run_id'])
             self.assertEqual(run(entry,['status'],projects[1],other)['run_id'],second['run_id'])
             event=dict(hook_event_name='Stop',session_id=CHAT,turn_id='offline',cwd=str(projects[1]))
+            transcript=codex/'sessions/2026/11/07'/f'rollout-fixture-{CHAT}.jsonl'
+            transcript.parent.mkdir(parents=True)
+            records=[
+                dict(type='session_meta',payload=dict(id=CHAT,cwd=str(projects[0]),cli_version='0.167.0-alpha.3.2')),
+                dict(type='event_msg',payload=dict(type='task_started',turn_id='offline',turn_trigger='composer')),
+                dict(type='turn_context',payload=dict(turn_id='offline',cwd=str(projects[0]),model='fixture-model')),
+            ]
+            transcript.write_text(''.join(json.dumps(r)+'\n' for r in records),encoding='utf-8')
+            event['transcript_path']=str(transcript)
             stop=skill/'scripts/goal_await_stop.py'
             self.assertEqual(run(stop,['--bindings',codex/'goal-await/bindings'],projects[1],input=json.dumps(event)),{})
             event['cwd']=str(projects[0])

@@ -2,6 +2,16 @@
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
+## 0.3.0-preview - 2026-11-14
+
+- Check new business tool activity before Stop continuation. Allow one correction for a text-only manual turn, then request review if there is still no activity.
+- Suppress prompts in plan mode and while visible tool or child activity is pending. Deduplicate callbacks and preserve the three-continuation limit across generations of the same host turn.
+- Keep the complete objective in continuation prompts and the exception-recovery budget separate.
+- Record the project installation's source version from `VERSION` instead of the fixed `0.1.0-preview` value; verify the saved installation record.
+- Validated with all 77 offline tests, including installation-version checks, on 2026-11-14. Live runtime acceptance of the Stop changes remains pending; the `0.2.0-preview` recovery observation below does not establish it.
+
+Upgrade: pause existing goals and native timers, uninstall the previous version, then install, verify trust, and reload this version. Existing goals do not restart automatically.
+
 ## 0.2.0-preview - 2026-11-07
 
 Exception-recovery preview for the existing same-chat Goal-await workflow.

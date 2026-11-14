@@ -6,7 +6,7 @@ Keep Codex working toward a goal in the current desktop chat. When work needs to
 
 Goal-await combines a **Skill, local state scripts, and a fixed Stop hook**. It uses native Codex scheduled tasks to return to the same chat. Once installed, new goals need no hook reconfiguration. Installation and runtime scripts use only the Python standard library.
 
-The current public preview is `0.2.0-preview`, designed for Codex. It adds opt-in recovery for two recognized interrupted-response cases. Validation currently covers Windows desktop. Other platforms, other failure classes, recovery across restarts, and long unattended runs have not been validated.
+The current public preview is `0.3.0-preview`, designed for Codex. Validation currently covers Windows desktop; other platforms, other failure classes, recovery across restarts, and long unattended runs have not been validated. See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Usage
 
@@ -22,6 +22,8 @@ $goal-await complete
 Usually, you only need to state the goal once; the AI handles waiting and completion as work progresses. Include the expected outputs, acceptance criteria, and allowed resources. When waiting is needed, provide the result or log location. You do not need to repeat information already available in the chat.
 
 Each chat manages one unfinished goal at a time, and checks use that chat's current model. Automatic progress stops with an explanation when the check count, time limit, or continuation budget is exhausted. `$goal-await` invokes a Skill. It maintains its own state separately from native Goal and does not add a built-in `/goal` command.
+
+Before continuing after a Stop, Goal-await checks whether the turn produced new business tool activity. A text-only manual turn receives one corrective continuation; if no new activity follows, automatic continuation stops for review. It does not prompt again while the chat is in plan mode or while a visible wait is active. Continuation prompts still include the complete objective, and the three-continuation limit for a host turn still applies.
 
 The Skill adds `--recover-errors` by default when it starts a new goal; direct CLI use is opt-in. Recovery defaults to two attempts at two-minute intervals. Configure it with `--recovery-max-attempts` (1 through 5) and `--recovery-interval-minutes` (1 through 60).
 
@@ -39,11 +41,11 @@ Recovery uses a one-shot native `RDATE` task and the same automation ID as a lat
 
 At start, the Skill pins the model from the actual context of the active transcript. The host may still choose a fallback model for one checker request. The recovery gate then rejects business continuation if the actual model differs from the pinned model; the Skill cannot prevent the host from sending that request. User interruption, an unknown error, an unsupported or malformed transcript, model drift, exhausted attempts, or an unacknowledged delivery stops automatic recovery. If the model fails before the first recovery gate or before the next one-shot is armed, that single scheduled wake is already spent and the user must continue manually.
 
-Stop behavior for the complete objective is unchanged in this release. Continuation prompts still carry the full objective, and the separate per-turn Stop limit remains three continuations; exception recovery has its own default budget of two and does not consume Stop continuations.
+Stop continuation now uses the activity check described above. Continuation prompts still carry the complete objective, and the per-turn Stop limit remains three continuations; exception recovery has its own default budget of two and does not consume Stop continuations.
 
-Goals created without recovery fields keep the old behavior. To upgrade from `0.1.0-preview`, pause the goals and native timers, uninstall, then install `0.2.0-preview`, verify trust, and reload. Unfinished goals do not restart automatically. After an old RUNNING goal has been manually resumed, call `recovery-enable` in that same business chat and execute the returned effects to add recovery protection.
+Goals created without recovery fields keep the old behavior. To upgrade from an earlier version, pause the goals and native timers, uninstall that installed version, then install `0.3.0-preview`, verify trust, and reload. Unfinished goals do not restart automatically. After an old RUNNING goal has been manually resumed, call `recovery-enable` in that same business chat and execute the returned effects to add recovery protection.
 
-This preview was validated with 38 offline tests covering the user and project installers, lifecycle behavior, recovery gates, duplicate handling, attempt counts, interruption and model guards. The Windows desktop scheduler at `26.1103.4239.0` with core `0.167.0-alpha.3.2` was inspected. One real Kimi K3.1-Pro `max_output_tokens` failure was observed through a native heartbeat and same-chat, same-model recovery admission 1 of 2, followed by an acknowledged business continuation. This does not establish recovery for other failure classes, reboots, or end-to-end business or scientific validity. The premature-stream cases were validated offline only.
+The `0.2.0-preview` recovery work was validated with 38 offline tests covering the user and project installers, lifecycle behavior, recovery gates, duplicate handling, attempt counts, interruption and model guards. The Windows desktop scheduler at `26.1103.4239.0` with core `0.167.0-alpha.3.2` was inspected. In that release, one real Kimi K3.1-Pro `max_output_tokens` failure was observed through a native heartbeat and same-chat, same-model recovery admission 1 of 2, followed by an acknowledged business continuation. This does not establish recovery for other failure classes, reboots, or end-to-end business or scientific validity. The premature-stream cases were validated offline only. The new Stop activity check has been validated offline only and has live runtime acceptance pending; it does not extend that historical recovery result.
 
 ## Automatic selection or explicit invocation
 

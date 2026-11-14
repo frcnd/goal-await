@@ -23,7 +23,7 @@ class Release(unittest.TestCase):
         self.project=self.base/'project with spaces 中文';self.project.mkdir()
         self.backups=self.base/'backups'
         self.skill=self.project/'.agents/skills/goal-await'
-        self.env=dict(os.environ,CODEX_THREAD_ID=CHAT,PYTHONUTF8='1')
+        self.env=dict(os.environ,CODEX_THREAD_ID=CHAT,PYTHONUTF8='1',CODEX_HOME=str(self.base/'codex'))
 
     def run_py(self,path,*args,ok=True):
         p=subprocess.run([sys.executable,'-X','utf8',str(path),*map(str,args)],cwd=self.project,
@@ -101,11 +101,23 @@ class Release(unittest.TestCase):
 
     def test_relocated_short_lifecycle_and_fixed_hook(self):
         self.setup_skill()
+        expected_version=(REPO/'VERSION').read_text(encoding='utf-8').strip()
+        record=json.loads((self.project/'.goal-await/install.json').read_text(encoding='utf-8'))
+        self.assertEqual(record['source_version'],expected_version)
         hook=self.project/'.codex/hooks.json';initial=hook.read_bytes()
         started=self.entry('start','--objective','finish result','--workspace',self.project)
         run_id=started['run_id']
         handler=json.loads(initial)['hooks']['Stop'][0]['hooks'][0]['command']
         event=dict(hook_event_name='Stop',session_id=CHAT,turn_id='one-turn',cwd=str(self.project))
+        transcript=self.base/'codex/sessions/2026/11/07'/f'rollout-fixture-{CHAT}.jsonl'
+        transcript.parent.mkdir(parents=True)
+        records=[
+            dict(type='session_meta',payload=dict(id=CHAT,cwd=str(self.project),cli_version='0.167.0-alpha.3.2')),
+            dict(type='event_msg',payload=dict(type='task_started',turn_id='one-turn',turn_trigger='composer')),
+            dict(type='turn_context',payload=dict(turn_id='one-turn',cwd=str(self.project),model='fixture-model')),
+        ]
+        transcript.write_text(''.join(json.dumps(r)+'\n' for r in records),encoding='utf-8')
+        event['transcript_path']=str(transcript)
         def stop():
             # Match native command_runner's raw outer quoting on Windows;
             # subprocess(list) would incorrectly backslash-escape inner quotes.
@@ -131,7 +143,9 @@ class Release(unittest.TestCase):
         self.assertEqual(stop(),{})
         new=self.entry('start','--objective','second goal','--workspace',self.project)
         self.assertNotEqual(run_id,new['run_id'])
-        self.assertIn('second goal',stop()['reason'])
+        reason=stop()['reason']
+        self.assertIn('second goal',reason)
+        self.assertEqual(self.entry('context')['objective'],'second goal')
         self.assertEqual(hook.read_bytes(),initial)
 
     def test_uninstall_preserves_other_hooks_and_retains_state(self):

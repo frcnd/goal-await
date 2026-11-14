@@ -36,6 +36,8 @@ Use the current context to clarify the goal, inputs, expected artifacts, accepta
 
 Advance only goals authorized in the current conversation, and respect user pauses and interruptions. Do not scan, rewrite, or restart goals in other conversations. Verify evidence for the complete goal before finishing. Writing local state alone does not mean a native timer operation succeeded; verify the actual tool receipt.
 
+Before a Stop continuation, read the turn's business tool activity. File changes, commands, and valid tool results can support further work; plans, status narration, Goal-await control bookkeeping, and prior hook feedback do not count as progress. A text-only manual turn receives one corrective continuation. If the next check still finds no new activity, automatic continuation stops and the goal moves to review. Plan mode and a visible active wait suppress extra prompts. Keep the full objective in continuation prompts, and keep the three-continuation limit for each host turn. Activity is evidence about whether to continue, not proof that the complete goal has passed acceptance.
+
 ## Exception recovery
 
 For a new goal, use the Skill's start workflow with `--recover-errors`; this is the Skill default. The CLI option remains explicit opt-in. The default is two attempts at two-minute intervals, configurable with `--recovery-max-attempts` from 1 through 5 and `--recovery-interval-minutes` from 1 through 60. If start cannot identify a supported active transcript and actual model, stop and explain that recovery was not enabled; do not guess or substitute a model.
@@ -46,7 +48,7 @@ Recovery admits only an exact terminal `max_output_tokens` message or one of the
 
 The host may route one checker request to a fallback model. The Skill cannot prevent that request, but the gate must reject business continuation when the actual model differs from the model pinned from the transcript. Stop recovery on user interruption, unknown errors, missing or unsupported transcript data, model drift, exhausted attempts, or an unacknowledged delivery. If the model fails before the first recovery gate or before the next one-shot is armed, report that the single wake was consumed and ask the user to continue manually.
 
-For an old RUNNING goal after a manual resume, call `recovery-enable` in that same business chat and execute the returned effects. Existing goals without recovery fields keep their old behavior. Before upgrading from `0.1.0-preview`, pause the goals and native timers, uninstall, then install and reload `0.2.0-preview`. Do not claim that existing goals restart automatically; they do not.
+For an old RUNNING goal after a manual resume, call `recovery-enable` in that same business chat and execute the returned effects. Existing goals without recovery fields keep their old behavior. Before upgrading from an earlier version, pause the goals and native timers, uninstall the current installation, then install and reload `0.3.0-preview`. Do not claim that existing goals restart automatically; they do not.
 
 ## Installation conflicts
 
