@@ -6,7 +6,7 @@ Keep Codex working toward a goal in the current desktop chat. When work needs to
 
 Goal-await combines a **Skill, local state scripts, and a fixed Stop hook**. It uses native Codex scheduled tasks to return to the same chat. Once installed, new goals need no hook reconfiguration. Installation and runtime scripts use only the Python standard library.
 
-The current public preview is `0.3.1-preview`, designed for Codex. Validation currently covers Windows desktop; other platforms, other failure classes, recovery across restarts, and long unattended runs have not been validated. See [CHANGELOG.md](CHANGELOG.md) for version history.
+The current public preview is `0.4.0-preview`, designed for Codex. Validation currently covers Windows desktop; other platforms, other failure classes, recovery across restarts, and long unattended runs have not been validated. See [CHANGELOG.md](CHANGELOG.md) for version history.
 
 ## Usage
 
@@ -20,6 +20,8 @@ $goal-await complete
 ```
 
 Usually, you only need to state the goal once; the AI handles waiting and completion as work progresses. Include the expected outputs, acceptance criteria, and allowed resources. When waiting is needed, provide the result or log location. You do not need to repeat information already available in the chat.
+
+Before using `wait`, the agent must verify who will make progress and record the evidence with the required `--progress-evidence` option. It waits only when work has already started, a request has been explicitly accepted, or a known event will occur independently. If another conversation or person must act and the request has not been issued or accepted, the goal is marked `blocked`, its scheduled check is paused, and the reply states who must do what and how the block can be cleared. Monitoring does not dispatch the request. Resuming a blocked goal returns to work for reassessment. An older wait without progress evidence stops for `NEEDS_REVIEW`.
 
 Each chat manages one unfinished goal at a time. Model selection remains with the host and user configuration; a manual switch or host fallback does not rebind the goal or restore spent recovery attempts. Automatic progress stops with an explanation when the check count, time limit, or continuation budget is exhausted. `$goal-await` invokes a Skill. It maintains its own state separately from native Goal and does not add a built-in `/goal` command.
 
@@ -43,9 +45,9 @@ Model selection remains with the host and user configuration. A manual switch or
 
 Stop continuation now uses the activity check described above. Continuation prompts still carry the complete objective, and the per-turn Stop limit remains three continuations; exception recovery has its own default budget of two and does not consume Stop continuations.
 
-Goals created without recovery fields keep the old behavior. To upgrade from an earlier version, pause the goals and native timers, uninstall that installed version, then install `0.3.1-preview`, verify trust, and reload. Unfinished goals do not restart automatically. After an old RUNNING goal has been manually resumed, call `recovery-enable` in that same business chat and execute the returned effects to add recovery protection.
+Goals created without recovery fields keep the old behavior. To upgrade from an earlier version, pause the goals and native timers, uninstall that installed version, then install `0.4.0-preview`, verify trust, and reload. Unfinished goals do not restart automatically. After an old RUNNING goal has been manually resumed, call `recovery-enable` in that same business chat and execute the returned effects to add recovery protection.
 
-The `0.2.0-preview` recovery work was validated with 38 offline tests covering the user and project installers, lifecycle behavior, recovery gates, duplicate handling, attempt counts, interruption and model guards. The Windows desktop scheduler at `26.1103.4239.0` with core `0.167.0-alpha.3.2` was inspected. In that release, one real Kimi K3.1-Pro `max_output_tokens` failure was observed through a native heartbeat and same-chat, same-model recovery admission 1 of 2, followed by an acknowledged business continuation. This does not establish recovery for other failure classes, reboots, or end-to-end business or scientific validity. The premature-stream cases were validated offline only. The Stop activity check and host-selected model behavior have only offline validation; live runtime acceptance remains pending; they do not extend that historical recovery result.
+The `0.2.0-preview` recovery work was validated with 38 offline tests covering the user and project installers, lifecycle behavior, recovery gates, duplicate handling, attempt counts, interruption and model guards. The Windows desktop scheduler at `26.1103.4239.0` with core `0.167.0-alpha.3.2` was inspected. In that release, one real Kimi K3.1-Pro `max_output_tokens` failure was observed through a native heartbeat and same-chat, same-model recovery admission 1 of 2, followed by an acknowledged business continuation. This does not establish recovery for other failure classes, reboots, or end-to-end business or scientific validity. The premature-stream cases were validated offline only. The Stop activity check, host-selected model behavior, and wait admission have only offline validation; live runtime acceptance remains pending; they do not extend that historical recovery result.
 
 ## Automatic selection or explicit invocation
 

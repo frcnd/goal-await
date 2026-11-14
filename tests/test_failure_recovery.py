@@ -146,7 +146,8 @@ class FailureRecovery(unittest.TestCase):
 
     def test_wait_uses_same_timer_and_ack_rearms_one_shot(self):
         waiting = self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
-                            '--result-location', 'fixture.json')
+                            '--result-location', 'fixture.json',
+                            '--progress-evidence', 'offline fixture job already started')
         spec = waiting['effects']['automation']
         self.assertEqual(spec['id'], 'fixture-timer')
         self.assertTrue(spec['rrule'].startswith('RDATE:'))
@@ -228,7 +229,8 @@ class FailureRecovery(unittest.TestCase):
 
     def test_waiting_check_report_and_ack_allow_model_changes(self):
         self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
-                  '--result-location', 'fixture.json')
+                  '--result-location', 'fixture.json',
+                  '--progress-evidence', 'offline fixture job already started')
         self.change_model('original', 'manually/check-model')
         admitted = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')
         self.assertTrue(admitted['eligible'], admitted)
@@ -247,7 +249,8 @@ class FailureRecovery(unittest.TestCase):
 
     def test_waiting_check_accepts_a_heartbeat_without_model_context(self):
         self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
-                  '--result-location', 'fixture.json')
+                  '--result-location', 'fixture.json',
+                  '--progress-evidence', 'offline fixture job already started')
         self.finish('original', error=None)
         self.start_turn('fallback', 'automation_heartbeat_scheduled', model=None)
         admitted = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')
@@ -257,7 +260,8 @@ class FailureRecovery(unittest.TestCase):
 
     def test_waiting_before_gate_failure_has_no_recurring_schedule(self):
         waiting = self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
-                            '--result-location', 'fixture.json')
+                            '--result-location', 'fixture.json',
+                            '--progress-evidence', 'offline fixture job already started')
         schedule = waiting['effects']['automation']['rrule']
         # A scheduler consumes the only date on dispatch. Failure before check
         # executes has no recurrence and no emitted update to rearm it.
@@ -267,7 +271,8 @@ class FailureRecovery(unittest.TestCase):
 
     def test_waiting_interrupt_does_not_restart_business(self):
         self.call(self.entry, 'wait', '--waiting-for', 'fixture', '--completion', 'ready',
-                  '--result-location', 'fixture.json')
+                  '--result-location', 'fixture.json',
+                  '--progress-evidence', 'offline fixture job already started')
         self.append('event_msg', type='turn_aborted', turn_id='original', reason='interrupted')
         self.start_turn('after-interrupt', 'automation_heartbeat_scheduled')
         rejected = self.call(self.core, 'check', '--run-id', self.run_id, '--generation', '1')

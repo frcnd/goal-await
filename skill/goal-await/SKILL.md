@@ -30,15 +30,27 @@ description: 用 Goal-await 在当前桌面对话持续推进明确目标，安�
 | 用户意图 | 脚本动作与输入 |
 |---|---|
 | 开始 | `start --objective '完整目标及验收标准' --workspace '当前对话目录' --context-summary '进展、下一步、证据入口' --recover-errors` |
-| 等待 | `wait --waiting-for '在等什么' --completion '怎样算完成' --result-location '结果/日志/查询位置'`；按任务安排 interval-minutes、timeout-minutes、max-checks，可加 guide |
+| 等待 | `wait --waiting-for '在等什么' --completion '怎样算完成' --result-location '结果/日志/查询位置' --progress-evidence '推进方或事件及实际证据'`；按任务安排 interval-minutes、timeout-minutes、max-checks，可加 guide |
 | 暂停 | `pause --reason '用户原因'` |
-| 恢复 | `resume`，恢复当前目标或原等待，不重新提交业务作业 |
+| 恢复 | `resume`，恢复工作或有效等待；BLOCKED 先重新判断下一步，不重提业务作业 |
 | 完成 | 独立核对完整目标后 `complete --reason '验收依据'` |
-| 需用户处理 | `blocked --reason '缺少的必要输入、授权或具体边界'` |
+| 需外部处理 | `blocked --reason '卡在哪里；谁做什么；解除条件'` |
 | 查看/摘要 | `status`；`context-update --context-summary '最新进展' --decision '最近决定'` |
 | 为旧目标启用异常恢复 | 在原会话继续工作时调用 `recovery-enable`，再同步 effects；不借此自动重启其他会话 |
 
 如果已有未完成目标，继续或恢复它，不用新目标绕过暂停。开始后立即做已授权工作，Stop 在 RUNNING 且模型准备停止时核对本段执行证据，再决定是否提醒继续；等待、暂停、blocked、完成允许结束本轮。单轮接续和观察预算耗尽会进入 NEEDS_REVIEW，应说明原因。用户中断后保持停止。
+
+## 等待与阻塞
+
+- **先核实谁在推进。** 只有工作已启动、请求已明确接手且会继续执行，或事件会自行发生时，才可 `wait`。用 `--progress-evidence` 记录实际依据（如作业 ID、接手回执、开放时间），并确认能从哪里观察结果；字段有内容不代表事实已核实。
+
+- **能做的先做，未落实的外部行动要阻塞。** 当前对话能在授权内完成的步骤先执行；若需要其他会话或人员行动，但尚未交办、无人接手或执行方明确在等人协调，应 `blocked` 并暂停已有定时任务。直接告诉用户：卡在哪里、需要谁做什么、怎样解除，不能只说“等待协调”。
+
+- **监控不会交办。** 有发送授权时先协调并核实回执，再判断能否等待；没有授权时说明所需行动，不擅自发消息。监控记录或结果路径不能证明有人在处理。
+
+- **发现依赖未落实，及时停止等待。** 核实后用 `report --result blocked --blocker-kind dependency` 写明证据和行动需求，暂停监控并通知用户。无新结果、工具报错或长期无变化本身不足以判定阻塞。
+
+- **恢复后重新判断。** BLOCKED 不直接重启旧等待；先核实解除条件，再决定执行或等待。旧等待缺少推进依据时进入 NEEDS_REVIEW，恢复后同样重新判断。
 
 ## Stop 自动继续
 

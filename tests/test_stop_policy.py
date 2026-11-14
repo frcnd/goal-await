@@ -115,7 +115,8 @@ class StopPolicy(unittest.TestCase):
             self.command()
             self.assertEqual(self.stop()['decision'],'block')
         waiting = self.run_cli(self.scripts/'goal_entry.py','wait','--waiting-for','fixture result',
-            '--completion','fixture ready','--result-location','fixture.json')
+            '--completion','fixture ready','--result-location','fixture.json',
+            '--progress-evidence','offline fixture job already started')
         self.run_cli(self.scripts/'goal_entry.py','bind','--automation-id','fixture-timer')
         generation = str(waiting['generation'])
         run_id = self.state()['run_id']

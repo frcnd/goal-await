@@ -2,6 +2,16 @@
 
 **English** | [简体中文](CHANGELOG.zh-CN.md)
 
+## 0.4.0-preview - 2026-11-14
+
+- Require `wait --progress-evidence` to record work already started or explicitly accepted, or an independently occurring event. The field records a declaration; the agent must still verify the facts.
+- Treat unissued external dependencies as blockers with concrete action needs. Observation can report `dependency` and pause monitoring; monitoring does not dispatch work on the user's behalf.
+- Resume blocked goals into the work phase for reassessment. Returning to work clears the previous wait and observation; legacy waits without progress evidence enter `NEEDS_REVIEW`.
+- Condense the Skill, guide, and observation rules while preserving admission, evidence, authorization, and reassessment requirements. Dependency tests use explicit coordination replies.
+- Validated with all 92 offline tests on 2026-11-14, including wait admission, dependency reports, legacy-wait review, and installation-version checks. Live acceptance of the combined Stop, model-selection, and wait-admission changes remains pending.
+
+Upgrade: pause goals and native timers, uninstall the previous version, then install, verify trust, and reload. Existing goals do not restart automatically. Before waiting again, reassess blocked goals and legacy waits and provide fresh `--progress-evidence`; do not reuse an unverified old wait.
+
 ## 0.3.1-preview - 2026-11-14
 
 - Allow manual model changes and host fallback chains during recovery, waiting, acknowledgement, and Stop continuation. Model selection remains with the host and user configuration.

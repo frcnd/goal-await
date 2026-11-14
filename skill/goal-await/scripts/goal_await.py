@@ -182,7 +182,17 @@ def reject_recovery(root, state, reason, turn_id=None):
     return response(root,state,accepted=False,eligible=False,reason=reason)
 
 
+def wait_has_progress(note):
+    evidence = (note or {}).get('progress_evidence')
+    return isinstance(evidence, str) and bool(evidence.strip())
+
+
 def enter_wait(state, note):
+    if not wait_has_progress(note):
+        raise ValueError('wait requires --progress-evidence: identify work already started or accepted, '
+                         'or an independently occurring event, with observable evidence. '
+                         'If someone must first act on an unissued request, use blocked --reason '
+                         'to name who must do what and how to resume; monitoring cannot dispatch work.')
     state['generation'] += 1
     state['state'] = 'WAITING'
     state['wait'] = dict(note, run_id=state['run_id'], thread_id=state['thread_id'],
@@ -210,7 +220,8 @@ def observation_instructions(root, state):
 根据目标、完成标准与真实证据，自主选择已授权的文件、日志、进程、远端查询或现有脚本；无需专用检查器。
 检查指南和旧脚本输出仅供参考。工具失败先核对返回路径、工作目录和参数，并尝试其他已授权只读证据；保留原错误，不提权、不重试外部模型、不重启/重提/取消业务工作，不修改业务产物。
 任务状态 task_state 为 running/completed/failed/uncertain；观测状态 observation_state 为 ok/tool_error/insufficient_evidence。工具或路径出错、进程查询被拒绝均不证明任务失败，也不自动需要用户介入。
-脚本故障但替代证据充分时，可以独立判断完成或失败；有真实业务失败证据则报告 failed，交回主对话决定修复或下一步。确有授权不足、必需用户输入或安全边界才可 blocked，并提供 blocker_kind=authorization/input/safety/user。长时间不确定仍是 uncertain，达到观察预算后暂停观察并提示，不能谎报业务 blocked。
+替代证据充分时可独立判断完成或失败；真实业务失败报告 failed，交回主对话处理。blocked 只用于确实缺少授权、必要输入、存在安全边界或外部依赖未落实，blocker_kind=authorization/input/safety/user/dependency。
+核实 wait.progress_evidence 是否仍成立。若确认需要其他会话或人员行动，但尚未交办、无人接手或执行方明确在等人协调，立即报告 blocked（dependency），写清证据、谁做什么及解除条件，暂停监控并通知用户。监控不会交办任务，也不授权发消息。仅无新结果、工具报错或长期无变化仍属 uncertain；观察预算耗尽后暂停并说明，不能据此判定阻塞。
 报告必须绑定本轮 observation_id，并写明真实证据来源。若报告因编号不匹配被拒绝，核对本轮准入回执并更正字段，不把控制记账错误当作业务问题，也不重新执行check消耗新一轮：
 {command(root, 'report')} --generation {state['generation']} --observation-id '<本轮ID>' --task-state <状态> --observation-state <状态> --reason '<简短理由>' --evidence '<实际证据与工具错误>'
 若确需用户处理，可改用 --result blocked 并添加 --blocker-kind <类型>。理由和证据正确转义，不执行占位符。
@@ -277,12 +288,12 @@ def effects(root, state, *, dispatch=False):
                     kind='heartbeat',destination='thread',targetThreadId=state['thread_id'])
         if ident or state['state'] == 'RUNNING':
             result['automation'] = dict(spec,mode='update',id=ident) if ident else dict(spec,mode='create')
-    elif state.get('wait') and (ident or state['state'] == 'WAITING'):
+    elif state.get('wait') and (ident or state['state'] == 'WAITING' and wait_has_progress(state['wait'])):
         spec = dict(name='Goal-await ' + state['run_id'],
                     prompt=checker_prompt(root, state),
                     rrule=(one_shot(state['wait']['next_at']) if recovery else
                            f"RRULE:FREQ=MINUTELY;INTERVAL={state['wait']['interval_minutes']}"),
-                    status='ACTIVE' if state['state'] == 'WAITING' else 'PAUSED')
+                    status='ACTIVE' if state['state'] == 'WAITING' and wait_has_progress(state['wait']) else 'PAUSED')
         if state.get('trigger_kind', 'cron') == 'heartbeat':
             spec.update(kind='heartbeat', destination='thread', targetThreadId=state['checker_thread_id'])
         else:  # Preserve existing records; new goals always use a fixed checker chat.
@@ -413,7 +424,7 @@ def act(root, action, **args):
         if action == 'wait':
             if state['state'] != 'RUNNING':
                 raise ValueError('Only a running goal can register a new wait')
-            note = {k: args.get(k) for k in ['waiting_for', 'completion', 'result_location', 'guide',
+            note = {k: args.get(k) for k in ['waiting_for', 'completion', 'result_location', 'progress_evidence', 'guide',
                                          'interval_minutes', 'timeout_minutes', 'max_checks']}
             note['guide'] = note['guide'] or '根据目标与完成标准自主只读调查；检查程序可选，工具错误时寻找其他已授权证据。'
             if not all(isinstance(note[k], str) and note[k].strip() for k in ['waiting_for', 'completion', 'result_location']):
@@ -432,6 +443,8 @@ def act(root, action, **args):
         elif action in ['pause', 'blocked']:
             if state['state'] not in ['RUNNING', 'WAITING']:
                 return response(root, state, accepted=False)
+            if action == 'blocked' and not (args.get('reason') or '').strip():
+                raise ValueError('blocked requires --reason: explain the blocker, who must do what, and the condition for resuming')
             state['before_pause'] = state['state']
             state['state'] = 'PAUSED_BY_USER' if action == 'pause' else 'BLOCKED'
             state['reason'] = args.get('reason') or '用户暂停'
@@ -440,10 +453,14 @@ def act(root, action, **args):
         elif action == 'resume':
             if state['state'] not in ['PAUSED_BY_USER', 'BLOCKED', 'NEEDS_REVIEW']:
                 raise ValueError('Only an explicitly paused or blocked goal can be resumed')
-            if state.get('before_pause') == 'WAITING':
+            # A blocked dependency must be reassessed, not silently monitored again.
+            # Old waits without progress evidence also return to business work.
+            if (state['state'] != 'BLOCKED' and state.get('before_pause') == 'WAITING'
+                    and wait_has_progress(state.get('wait'))):
                 enter_wait(state, state['wait'])
             else:
-                state.update(state='RUNNING', generation=state['generation'] + 1, delivery=None)
+                state.update(state='RUNNING', generation=state['generation'] + 1, delivery=None, wait=None)
+                state.pop('active_observation', None)
                 state.pop('reason', None)
                 arm_recovery(state)
             state.pop('before_pause', None)
@@ -461,6 +478,12 @@ def act(root, action, **args):
             boundary_error = continuation_boundary_error(state)
             if boundary_error:
                 return continuation_review(root,state,boundary_error)
+            if not wait_has_progress(note):
+                reason = '旧等待缺少推进依据；暂停检查，请先核实工作是否已启动或外部请求是否已落实，再决定工作、阻塞或重新登记等待'
+                state.update(state='NEEDS_REVIEW', before_pause='WAITING', reason=reason)
+                state['generation'] += 1
+                save(root, state, 'wait_progress_review', reason=reason)
+                return response(root, state, eligible=False, reason=reason)
             if action == 'check':
                 if not state.get('automation_id'):
                     return response(root, state, accepted=False, eligible=False)
@@ -496,10 +519,10 @@ def act(root, action, **args):
             observation_state = args.get('observation_state') or ('insufficient_evidence' if outcome == 'unknown' else 'ok')
             if observation_state not in ['ok', 'tool_error', 'insufficient_evidence']:
                 raise ValueError('Unknown observation state')
-            if outcome in ['ready', 'failed'] and not args.get('evidence', '').strip():
+            if outcome in ['ready', 'failed', 'blocked'] and not args.get('evidence', '').strip():
                 raise ValueError('A terminal task result needs actual evidence')
-            if outcome == 'blocked' and args.get('blocker_kind') not in ['authorization','input','safety','user']:
-                raise ValueError('blocked requires a genuine user/input/authorization/safety reason')
+            if outcome == 'blocked' and args.get('blocker_kind') not in ['authorization','input','safety','user','dependency']:
+                raise ValueError('blocked requires a genuine user/input/authorization/safety/dependency reason')
             state['last_check'] = dict(result=outcome, reason=args['reason'], evidence=args['evidence'],
                                        task_state=mapped, observation_state=observation_state,
                                        observation_id=args['observation_id'], blocker_kind=args.get('blocker_kind'),
@@ -579,6 +602,7 @@ def main():
     p.add_argument('--waiting-for')
     p.add_argument('--completion')
     p.add_argument('--result-location')
+    p.add_argument('--progress-evidence')
     p.add_argument('--guide')
     p.add_argument('--interval-minutes', type=int, default=1)
     p.add_argument('--timeout-minutes', type=int, default=15)
@@ -587,7 +611,7 @@ def main():
     p.add_argument('--observation-id')
     p.add_argument('--task-state', choices=['running','completed','failed','uncertain'])
     p.add_argument('--observation-state', choices=['ok','tool_error','insufficient_evidence'])
-    p.add_argument('--blocker-kind', choices=['authorization','input','safety','user'])
+    p.add_argument('--blocker-kind', choices=['authorization','input','safety','user','dependency'])
     p.add_argument('--result', choices=['pending', 'ready', 'blocked', 'unknown', 'failed'])
     p.add_argument('--reason', default='')
     p.add_argument('--evidence', default='')

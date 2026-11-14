@@ -127,7 +127,8 @@ class Release(unittest.TestCase):
             self.assertEqual(p.returncode,0,p.stderr)
             return json.loads(p.stdout)
         self.assertEqual(stop()['decision'],'block')
-        wait=self.entry('wait','--waiting-for','result','--completion','answer 42','--result-location','result.json')
+        wait=self.entry('wait','--waiting-for','result','--completion','answer 42','--result-location','result.json',
+                        '--progress-evidence','offline fixture job already started')
         self.assertEqual(wait['effects']['automation']['mode'],'create')
         self.entry('bind','--automation-id','offline-unit-timer')
         self.assertEqual(self.entry('pause')['effects']['automation']['status'],'PAUSED')
